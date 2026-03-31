@@ -8,14 +8,16 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use std::io::{Seek, SeekFrom, Write};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 const HOTKEY_SHORTCUT: &str = "Cmd+Shift+Space";
 const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
+const HOTKEY_TAP_THRESHOLD_MS: u128 = 220;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AudioChunk {
@@ -38,6 +40,14 @@ pub struct HotkeySessionEvent {
     pub shortcut: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct TimingEvent {
+    pub session_id: u64,
+    pub stage: String,
+    pub elapsed_ms: u128,
+    pub details: String,
+}
+
 #[derive(Clone)]
 struct ActiveRecording {
     file_path: String,
@@ -58,6 +68,23 @@ static STREAM_SLOT_LOCK: Mutex<()> = Mutex::new(());
 static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
 static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
 static HOTKEY_RECORDING: AtomicBool = AtomicBool::new(false);
+static HOTKEY_ARMED: AtomicBool = AtomicBool::new(true);
+static HOTKEY_SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+static HOTKEY_TIMING: Mutex<Option<HotkeyTiming>> = Mutex::new(None);
+static HOTKEY_MODE: Mutex<HotkeyMode> = Mutex::new(HotkeyMode::Idle);
+
+struct HotkeyTiming {
+    session_id: u64,
+    started_at: Instant,
+    stopped_at: Option<Instant>,
+}
+
+enum HotkeyMode {
+    Idle,
+    RecordingPendingDecision { pressed_at: Instant },
+    RecordingLatched,
+    RecordingStoppingOnRelease,
+}
 
 #[tauri::command]
 fn get_stt_settings(app: AppHandle) -> Result<stt::SttSettingsView, String> {
@@ -301,6 +328,38 @@ fn replace_playback_stream(stream: Option<cpal::Stream>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     unsafe {
         PLAYBACK_STREAM = stream;
+    }
+}
+
+fn log_timing(
+    app: Option<&AppHandle>,
+    session_id: u64,
+    stage: &str,
+    elapsed_ms: u128,
+    details: &str,
+) {
+    if details.is_empty() {
+        eprintln!(
+            "[voicestream][timing][session:{}] {}: {} ms",
+            session_id, stage, elapsed_ms
+        );
+    } else {
+        eprintln!(
+            "[voicestream][timing][session:{}] {}: {} ms ({})",
+            session_id, stage, elapsed_ms, details
+        );
+    }
+
+    if let Some(app) = app {
+        let _ = app.emit(
+            "timing-log",
+            TimingEvent {
+                session_id,
+                stage: stage.to_string(),
+                elapsed_ms,
+                details: details.to_string(),
+            },
+        );
     }
 }
 
@@ -659,20 +718,49 @@ fn paste_text_to_cursor(text: &str) -> Result<(), String> {
 }
 
 fn handle_hotkey_pressed(app: &AppHandle) {
-    if HOTKEY_RECORDING.swap(true, Ordering::SeqCst) {
-        return;
-    }
+    let mut mode = HOTKEY_MODE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    match start_recording_internal(app.clone()) {
-        Ok(_) => {
-            native_hud::show_recording(app);
-            emit_hotkey_state(app, "recording", "Listening...");
+    match &*mode {
+        HotkeyMode::Idle => {
+            HOTKEY_RECORDING.store(true, Ordering::SeqCst);
+
+            match start_recording_internal(app.clone()) {
+                Ok(_) => {
+                    let now = Instant::now();
+                    let session_id = HOTKEY_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Ok(mut timing) = HOTKEY_TIMING.lock() {
+                        *timing = Some(HotkeyTiming {
+                            session_id,
+                            started_at: now,
+                            stopped_at: None,
+                        });
+                    }
+                    *mode = HotkeyMode::RecordingPendingDecision { pressed_at: now };
+                    log_timing(
+                        Some(app),
+                        session_id,
+                        "session_started",
+                        0,
+                        "hotkey recording started",
+                    );
+                    native_hud::show_recording(app);
+                    emit_hotkey_state(app, "recording", "Listening...");
+                }
+                Err(error) => {
+                    HOTKEY_RECORDING.store(false, Ordering::SeqCst);
+                    *mode = HotkeyMode::Idle;
+                    native_hud::show_error(app, &error);
+                    emit_hotkey_state(app, "error", &error);
+                }
+            }
         }
-        Err(error) => {
-            HOTKEY_RECORDING.store(false, Ordering::SeqCst);
-            native_hud::show_error(app, &error);
-            emit_hotkey_state(app, "error", &error);
+        HotkeyMode::RecordingLatched => {
+            *mode = HotkeyMode::RecordingStoppingOnRelease;
+            emit_hotkey_state(app, "recording", "Release to stop.");
         }
+        HotkeyMode::RecordingPendingDecision { .. } | HotkeyMode::RecordingStoppingOnRelease => {}
     }
 }
 
@@ -690,9 +778,30 @@ async fn optimize_transcript_with_pi(text: String) -> Result<String, String> {
         .map_err(|error| format!("pi rpc task join failed: {}", error))?
 }
 
-fn handle_hotkey_released(app: &AppHandle) {
+fn finish_hotkey_recording(app: &AppHandle) {
     if !HOTKEY_RECORDING.swap(false, Ordering::SeqCst) {
         return;
+    }
+
+    let mut timing_snapshot = HOTKEY_TIMING
+        .lock()
+        .ok()
+        .and_then(|mut timing| timing.take())
+        .unwrap_or(HotkeyTiming {
+            session_id: 0,
+            started_at: Instant::now(),
+            stopped_at: None,
+        });
+    timing_snapshot.stopped_at = Some(Instant::now());
+
+    if let Some(stopped_at) = timing_snapshot.stopped_at {
+        log_timing(
+            Some(app),
+            timing_snapshot.session_id,
+            "recording",
+            stopped_at.duration_since(timing_snapshot.started_at).as_millis(),
+            "capture duration until stop",
+        );
     }
 
     if let Err(error) = stop_recording_internal() {
@@ -707,32 +816,101 @@ fn handle_hotkey_released(app: &AppHandle) {
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let stt_wait_started_at = Instant::now();
         match stt::wait_for_final_text(tokio::time::Duration::from_millis(HOTKEY_PASTE_WAIT_MS))
             .await
         {
             Ok(text) if !text.trim().is_empty() => {
+                log_timing(
+                    Some(&app),
+                    timing_snapshot.session_id,
+                    "stt_wait",
+                    stt_wait_started_at.elapsed().as_millis(),
+                    &format!("chars={}", text.chars().count()),
+                );
+                log_timing(
+                    Some(&app),
+                    timing_snapshot.session_id,
+                    "recording_to_stt_final",
+                    timing_snapshot.started_at.elapsed().as_millis(),
+                    "from recording start to final transcript",
+                );
+
                 native_hud::show_processing_text(&app, "Optimizing...");
                 emit_hotkey_state(&app, "processing", "Optimizing...");
 
+                let optimize_started_at = Instant::now();
                 let (final_text, pasted_message) =
                     match optimize_transcript_with_pi(text.clone()).await {
                         Ok(refined) if !refined.trim().is_empty() => {
+                            log_timing(
+                                Some(&app),
+                                timing_snapshot.session_id,
+                                "optimize",
+                                optimize_started_at.elapsed().as_millis(),
+                                &format!(
+                                    "input_chars={}, output_chars={}, optimized=true",
+                                    text.chars().count(),
+                                    refined.chars().count()
+                                ),
+                            );
                             (refined, "Pasted optimized text".to_string())
                         }
-                        Ok(_) => (text, "Pasted raw transcript".to_string()),
+                        Ok(_) => {
+                            log_timing(
+                                Some(&app),
+                                timing_snapshot.session_id,
+                                "optimize",
+                                optimize_started_at.elapsed().as_millis(),
+                                &format!(
+                                    "input_chars={}, output_chars=0, optimized=false-empty",
+                                    text.chars().count()
+                                ),
+                            );
+                            (text, "Pasted raw transcript".to_string())
+                        }
                         Err(error) => {
+                            log_timing(
+                                Some(&app),
+                                timing_snapshot.session_id,
+                                "optimize_failed",
+                                optimize_started_at.elapsed().as_millis(),
+                                &error,
+                            );
                             eprintln!("pi optimization failed: {}", error);
-                            (text, format!("Pi optimize failed, pasted raw transcript"))
+                            (text, "Pi optimize failed, pasted raw transcript".to_string())
                         }
                     };
 
+                let paste_started_at = Instant::now();
                 match paste_text_to_cursor(&final_text) {
                     Ok(()) => {
+                        log_timing(
+                            Some(&app),
+                            timing_snapshot.session_id,
+                            "paste",
+                            paste_started_at.elapsed().as_millis(),
+                            &format!("chars={}", final_text.chars().count()),
+                        );
+                        log_timing(
+                            Some(&app),
+                            timing_snapshot.session_id,
+                            "end_to_end",
+                            timing_snapshot.started_at.elapsed().as_millis(),
+                            "from recording start to paste complete",
+                        );
                         native_hud::show_success(&app, &final_text);
                         schedule_hide_hud(&app, 850);
                         emit_hotkey_state(&app, "pasted", &pasted_message);
                     }
                     Err(error) => {
+                        log_timing(
+                            Some(&app),
+                            timing_snapshot.session_id,
+                            "paste_failed",
+                            paste_started_at.elapsed().as_millis(),
+                            &error,
+                        );
                         native_hud::show_error(&app, &error);
                         schedule_hide_hud(&app, 1100);
                         emit_hotkey_state(&app, "error", &error);
@@ -740,17 +918,58 @@ fn handle_hotkey_released(app: &AppHandle) {
                 }
             }
             Ok(_) => {
+                log_timing(
+                    Some(&app),
+                    timing_snapshot.session_id,
+                    "stt_wait_empty",
+                    stt_wait_started_at.elapsed().as_millis(),
+                    "no transcript captured",
+                );
                 native_hud::show_error(&app, "No transcript");
                 schedule_hide_hud(&app, 900);
                 emit_hotkey_state(&app, "error", "No transcript captured");
             }
             Err(error) => {
+                log_timing(
+                    Some(&app),
+                    timing_snapshot.session_id,
+                    "stt_wait_failed",
+                    stt_wait_started_at.elapsed().as_millis(),
+                    &error,
+                );
                 native_hud::show_error(&app, &error);
                 schedule_hide_hud(&app, 1100);
                 emit_hotkey_state(&app, "error", &error);
             }
         }
     });
+}
+
+fn handle_hotkey_released(app: &AppHandle) {
+    let mut mode = HOTKEY_MODE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    match &*mode {
+        HotkeyMode::Idle => {}
+        HotkeyMode::RecordingPendingDecision { pressed_at } => {
+            let held_ms = pressed_at.elapsed().as_millis();
+            if held_ms >= HOTKEY_TAP_THRESHOLD_MS {
+                *mode = HotkeyMode::Idle;
+                drop(mode);
+                finish_hotkey_recording(app);
+            } else {
+                *mode = HotkeyMode::RecordingLatched;
+                emit_hotkey_state(app, "recording", "Listening... Press again to stop.");
+            }
+        }
+        HotkeyMode::RecordingLatched => {}
+        HotkeyMode::RecordingStoppingOnRelease => {
+            *mode = HotkeyMode::Idle;
+            drop(mode);
+            finish_hotkey_recording(app);
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -760,17 +979,26 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 native_hud::initialize(&app.handle());
-                let hold_to_talk_shortcut =
+                let toggle_recording_shortcut =
                     Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
 
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcut(hold_to_talk_shortcut.clone())?
+                        .with_shortcut(toggle_recording_shortcut.clone())?
                         .with_handler(move |app, shortcut, event| {
-                            if shortcut == &hold_to_talk_shortcut {
-                                match event.state() {
-                                    ShortcutState::Pressed => handle_hotkey_pressed(app),
-                                    ShortcutState::Released => handle_hotkey_released(app),
+                            if shortcut != &toggle_recording_shortcut {
+                                return;
+                            }
+
+                            match event.state() {
+                                ShortcutState::Pressed => {
+                                    if HOTKEY_ARMED.swap(false, Ordering::SeqCst) {
+                                        handle_hotkey_pressed(app);
+                                    }
+                                }
+                                ShortcutState::Released => {
+                                    HOTKEY_ARMED.store(true, Ordering::SeqCst);
+                                    handle_hotkey_released(app);
                                 }
                             }
                         })

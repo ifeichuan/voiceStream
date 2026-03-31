@@ -19,9 +19,12 @@ On Unix-like systems the file is written with `0600` permissions.
 Current behavior:
 
 - recording still uses the native Tauri audio pipeline
-- hold `Cmd+Shift+Space` to start recording, release to stop
+- `Cmd+Shift+Space` supports a hybrid interaction:
+  - hold to talk, then release to stop
+  - or tap once to latch recording, then press and release again to stop
 - audio chunks are downmixed to mono, resampled to 16 kHz PCM, and streamed to Bailian during recording
 - when transcription finishes, the app pastes the final text into the currently focused app through the macOS clipboard + `Cmd+V` flow
+- the end-to-end pipeline emits timing logs with per-session IDs for recording, STT wait, optimize, paste, and total latency
 
 Notes:
 

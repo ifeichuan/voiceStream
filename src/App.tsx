@@ -35,6 +35,13 @@ interface SttSettingsView {
   api_key_hint: string;
 }
 
+interface TimingEvent {
+  session_id: number;
+  stage: string;
+  elapsed_ms: number;
+  details: string;
+}
+
 const MAX_LOGS = 12;
 const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
 
@@ -55,7 +62,7 @@ function App() {
   const [finalTranscript, setFinalTranscript] = useState<string[]>([]);
   const [hotkeyStatus, setHotkeyStatus] = useState<HotkeySessionEvent>({
     state: "idle",
-    message: `Hold ${DEFAULT_SHORTCUT}`,
+    message: `Press ${DEFAULT_SHORTCUT} to start`,
     shortcut: DEFAULT_SHORTCUT,
   });
   const [sttSettings, setSttSettings] = useState<SttSettingsView>({
@@ -77,13 +84,14 @@ function App() {
       `[${new Date().toLocaleTimeString()}] ${message}`,
     ]);
   };
-  const hotkeyLabel = `Hold ${hotkeyStatus.shortcut}`;
+  const hotkeyLabel = `${hotkeyStatus.shortcut}`;
 
   useEffect(() => {
     let unlistenAudio: (() => void) | undefined;
     let unlistenStt: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
     let unlistenHotkey: (() => void) | undefined;
+    let unlistenTiming: (() => void) | undefined;
 
     addLog("Ready");
 
@@ -134,11 +142,23 @@ function App() {
       unlistenHotkey = dispose;
     });
 
+    void listen<TimingEvent>("timing-log", (event) => {
+      const { session_id, stage, elapsed_ms, details } = event.payload;
+      addLog(
+        details
+          ? `Timing #${session_id} ${stage}: ${elapsed_ms} ms (${details})`
+          : `Timing #${session_id} ${stage}: ${elapsed_ms} ms`,
+      );
+    }).then((dispose) => {
+      unlistenTiming = dispose;
+    });
+
     return () => {
       unlistenAudio?.();
       unlistenStt?.();
       unlistenStatus?.();
       unlistenHotkey?.();
+      unlistenTiming?.();
     };
   }, []);
 
@@ -227,8 +247,9 @@ function App() {
         <p className="eyebrow">VoiceStream</p>
         <h1>Realtime dictation bridge</h1>
         <p className="summary">
-          Hold the global shortcut to record, stream to Bailian, then auto-paste the final
-          transcript into the focused app.
+          Hold the global shortcut to talk and release to stop, or tap once to lock recording and
+          tap again to stop. The app then streams to Bailian and auto-pastes the final transcript
+          into the focused app.
         </p>
 
         <div className="shortcut-card">
