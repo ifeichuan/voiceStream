@@ -199,7 +199,25 @@ h2 {
   color: #bfe7c6;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.9rem;
-  min-height: 140px;
+  height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.log::-webkit-scrollbar {
+  width: 10px;
+}
+
+.log::-webkit-scrollbar-thumb {
+  background: rgba(191, 231, 198, 0.28);
+  border-radius: 999px;
+  border: 2px solid #0f172a;
+}
+
+.log::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .log div + div {

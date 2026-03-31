@@ -35,12 +35,12 @@ export default function voiceFeedbackExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "voice_feedback",
     label: "Voice Feedback",
-    description: "Speak a short, content-aware line before responding.",
-    promptSnippet: "Before responding, call this once with a short line that fits the current text.",
+    description: "Speak one short, content-aware sentence before responding.",
+    promptSnippet: "Before responding, call this once with one short sentence that fits the current text.",
     promptGuidelines: [
       "Call this once near the start when audible feedback is useful.",
-      "Use a short, natural line that fits the current text.",
-      "Keep it brief, usually 4 to 12 Chinese characters.",
+      "Use one short, natural sentence that fits the current text.",
+      "Prefer a complete sentence rather than a fragment, usually around 8 to 20 Chinese characters.",
       "Do not repeat the full input or give a long summary.",
       "Call it before the main text output.",
       "Speech starts asynchronously and interrupts any previous say playback.",
