@@ -1,0 +1,128 @@
+:root {
+  font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  color: #152033;
+  background: #f4f7fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 16px;
+}
+
+.panel {
+  padding: 24px;
+  border: 1px solid #d7e0eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(17, 28, 45, 0.08);
+}
+
+.panel + .panel {
+  margin-top: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #3b5ccc;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+h1,
+h2,
+.summary {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 4vw, 2.8rem);
+}
+
+.summary {
+  margin-top: 10px;
+  color: #5d6b7f;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  padding: 12px 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #152033;
+}
+
+.actions button:first-child {
+  background: #152033;
+  border-color: #152033;
+  color: #ffffff;
+}
+
+.actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.stats {
+  margin: 24px 0 0;
+  display: grid;
+  gap: 12px;
+}
+
+.stats div {
+  padding-top: 12px;
+  border-top: 1px solid #e6ecf3;
+}
+
+.stats dt {
+  color: #5d6b7f;
+  font-size: 0.85rem;
+}
+
+.stats dd {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.log {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #bfe7c6;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.9rem;
+  min-height: 120px;
+}
+
+.log div + div {
+  margin-top: 8px;
+}
