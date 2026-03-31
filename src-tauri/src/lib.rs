@@ -1,12 +1,14 @@
+mod audio;
 mod native_hud;
 mod stt;
 
+use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use std::io::{Seek, SeekFrom, Write};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
@@ -48,21 +50,11 @@ struct DecodedAudio {
     samples: Vec<f32>,
 }
 
-#[derive(Clone)]
-struct RecordedAudio {
-    file_path: String,
-    sample_rate: u32,
-    channels: u16,
-    chunks: Vec<Vec<i16>>,
-}
-
 static STREAM_RUNNING: AtomicBool = AtomicBool::new(false);
 static mut RECORDING_STREAM: Option<cpal::Stream> = None;
 static mut PLAYBACK_STREAM: Option<cpal::Stream> = None;
-static STREAM_MUTEX: Mutex<()> = Mutex::new(());
+static STREAM_SLOT_LOCK: Mutex<()> = Mutex::new(());
 static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
-static RECORDING_CHUNKS: Mutex<Vec<Vec<i16>>> = Mutex::new(Vec::new());
-static LATEST_RECORDING: Mutex<Option<RecordedAudio>> = Mutex::new(None);
 static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
 static HOTKEY_RECORDING: AtomicBool = AtomicBool::new(false);
 
@@ -112,18 +104,6 @@ fn create_wav_header(
     header.extend_from_slice(b"data");
     header.extend_from_slice(&data_size.to_le_bytes());
     header
-}
-
-fn normalize_f32_sample(sample: f32) -> i16 {
-    (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
-}
-
-fn normalize_u16_sample(sample: u16) -> i16 {
-    (sample as i32 - 32_768) as i16
-}
-
-fn pcm_i16_to_f32(sample: i16) -> f32 {
-    sample as f32 / i16::MAX as f32
 }
 
 fn parse_wav_file(file_path: &std::path::Path) -> Result<DecodedAudio, String> {
@@ -215,80 +195,6 @@ fn parse_wav_file(file_path: &std::path::Path) -> Result<DecodedAudio, String> {
     })
 }
 
-fn remix_channels(samples: &[f32], source_channels: u16, target_channels: u16) -> Vec<f32> {
-    if source_channels == target_channels {
-        return samples.to_vec();
-    }
-
-    let source_channels = source_channels as usize;
-    let target_channels = target_channels as usize;
-
-    if source_channels == 0 || target_channels == 0 {
-        return Vec::new();
-    }
-
-    let mut remixed = Vec::with_capacity(samples.len() / source_channels * target_channels);
-
-    for frame in samples.chunks_exact(source_channels) {
-        if target_channels == 1 {
-            remixed.push(frame.iter().copied().sum::<f32>() / source_channels as f32);
-            continue;
-        }
-
-        if source_channels == 1 {
-            remixed.extend(std::iter::repeat_n(frame[0], target_channels));
-            continue;
-        }
-
-        for channel in 0..target_channels {
-            remixed.push(frame[channel.min(source_channels - 1)]);
-        }
-    }
-
-    remixed
-}
-
-fn resample_interleaved(
-    samples: &[f32],
-    channels: u16,
-    source_rate: u32,
-    target_rate: u32,
-) -> Vec<f32> {
-    if source_rate == target_rate || samples.is_empty() {
-        return samples.to_vec();
-    }
-
-    let channels = channels as usize;
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    let source_frames = samples.len() / channels;
-    if source_frames <= 1 {
-        return samples.to_vec();
-    }
-
-    let target_frames =
-        ((source_frames as f64 * target_rate as f64) / source_rate as f64).round() as usize;
-    let last_frame = source_frames - 1;
-    let mut resampled = Vec::with_capacity(target_frames * channels);
-
-    for target_index in 0..target_frames {
-        let source_position = target_index as f64 * source_rate as f64 / target_rate as f64;
-        let base_index = source_position.floor() as usize;
-        let next_index = (base_index + 1).min(last_frame);
-        let fraction = (source_position - base_index as f64) as f32;
-
-        for channel in 0..channels {
-            let base_sample = samples[base_index * channels + channel];
-            let next_sample = samples[next_index * channels + channel];
-            resampled.push(base_sample + (next_sample - base_sample) * fraction);
-        }
-    }
-
-    resampled
-}
-
 fn prepare_playback_samples(
     decoded: DecodedAudio,
     target_sample_rate: u32,
@@ -299,27 +205,6 @@ fn prepare_playback_samples(
         &remixed,
         target_channels,
         decoded.sample_rate,
-        target_sample_rate,
-    )
-}
-
-fn prepare_playback_from_chunks(
-    chunks: &[Vec<i16>],
-    source_sample_rate: u32,
-    source_channels: u16,
-    target_sample_rate: u32,
-    target_channels: u16,
-) -> Vec<f32> {
-    let normalized: Vec<f32> = chunks
-        .iter()
-        .flat_map(|chunk| chunk.iter().copied())
-        .map(pcm_i16_to_f32)
-        .collect();
-    let remixed = remix_channels(&normalized, source_channels, target_channels);
-    resample_interleaved(
-        &remixed,
-        target_channels,
-        source_sample_rate,
         target_sample_rate,
     )
 }
@@ -400,6 +285,44 @@ fn emit_hotkey_state(app: &AppHandle, state: &str, message: &str) {
     );
 }
 
+fn replace_recording_stream(stream: Option<cpal::Stream>) {
+    let _guard = STREAM_SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        RECORDING_STREAM = stream;
+    }
+}
+
+fn replace_playback_stream(stream: Option<cpal::Stream>) {
+    let _guard = STREAM_SLOT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        PLAYBACK_STREAM = stream;
+    }
+}
+
+fn process_recording_chunk(
+    app: &AppHandle,
+    file_path: &str,
+    sample_rate: u32,
+    channels: u16,
+    chunk: Vec<i16>,
+) {
+    let size = chunk.len() * std::mem::size_of::<i16>();
+    emit_chunk(app, sample_rate, channels, size);
+    emit_audio_level(app, &chunk);
+
+    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
+        if let Some(provider) = provider.as_ref() {
+            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
+        }
+    }
+
+    write_pcm_chunk(file_path, &chunk);
+}
+
 fn start_recording_internal(app: AppHandle) -> Result<String, String> {
     if STREAM_RUNNING.load(Ordering::SeqCst) {
         return Err("Already recording".to_string());
@@ -415,17 +338,12 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
     let channels = config.channels();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
+        .map(|duration| duration.as_millis())
         .unwrap_or(0);
     let file_path = format!("/tmp/voicestream_{}.wav", timestamp);
 
     std::fs::write(&file_path, create_wav_header(sample_rate, channels, 16, 0))
         .map_err(|e| format!("Write header error: {}", e))?;
-
-    RECORDING_CHUNKS
-        .lock()
-        .map_err(|_| "Recording chunk lock poisoned".to_string())?
-        .clear();
 
     stt::reset_runtime_state();
     let provider = stt::create_default_stt_provider(app.clone())?;
@@ -443,18 +361,7 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
                 &config.clone().into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     let chunk: Vec<i16> = data.iter().copied().map(normalize_f32_sample).collect();
-                    let size = chunk.len() * std::mem::size_of::<i16>();
-                    emit_chunk(&app, sample_rate, channels, size);
-                    emit_audio_level(&app, &chunk);
-                    if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
-                        chunks.push(chunk.clone());
-                    }
-                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
-                        if let Some(provider) = provider.as_ref() {
-                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
-                        }
-                    }
-                    write_pcm_chunk(&file_path_clone, &chunk);
+                    process_recording_chunk(&app, &file_path_clone, sample_rate, channels, chunk);
                 },
                 err_fn,
                 None,
@@ -465,19 +372,13 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
             device.build_input_stream(
                 &config.clone().into(),
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let chunk = data.to_vec();
-                    let size = chunk.len() * std::mem::size_of::<i16>();
-                    emit_chunk(&app, sample_rate, channels, size);
-                    emit_audio_level(&app, &chunk);
-                    if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
-                        chunks.push(chunk.clone());
-                    }
-                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
-                        if let Some(provider) = provider.as_ref() {
-                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
-                        }
-                    }
-                    write_pcm_chunk(&file_path_clone, &chunk);
+                    process_recording_chunk(
+                        &app,
+                        &file_path_clone,
+                        sample_rate,
+                        channels,
+                        data.to_vec(),
+                    );
                 },
                 err_fn,
                 None,
@@ -489,18 +390,7 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
                 &config.clone().into(),
                 move |data: &[u16], _: &cpal::InputCallbackInfo| {
                     let chunk: Vec<i16> = data.iter().copied().map(normalize_u16_sample).collect();
-                    let size = chunk.len() * std::mem::size_of::<i16>();
-                    emit_chunk(&app, sample_rate, channels, size);
-                    emit_audio_level(&app, &chunk);
-                    if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
-                        chunks.push(chunk.clone());
-                    }
-                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
-                        if let Some(provider) = provider.as_ref() {
-                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
-                        }
-                    }
-                    write_pcm_chunk(&file_path_clone, &chunk);
+                    process_recording_chunk(&app, &file_path_clone, sample_rate, channels, chunk);
                 },
                 err_fn,
                 None,
@@ -512,11 +402,7 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
 
     stream.play().map_err(|e| format!("Play error: {}", e))?;
     STREAM_RUNNING.store(true, Ordering::SeqCst);
-
-    unsafe {
-        let _lock = STREAM_MUTEX.lock();
-        RECORDING_STREAM = Some(stream);
-    }
+    replace_recording_stream(Some(stream));
 
     *ACTIVE_RECORDING
         .lock()
@@ -542,31 +428,12 @@ fn stop_recording_internal() -> Result<String, String> {
         .map_err(|_| "Recording lock poisoned".to_string())?
         .take();
 
-    unsafe {
-        let _lock = STREAM_MUTEX.lock();
-        RECORDING_STREAM = None;
-    }
+    replace_recording_stream(None);
 
     STREAM_RUNNING.store(false, Ordering::SeqCst);
 
     if let Some(recording) = finished_recording.as_ref() {
         finalize_recording_file(recording)?;
-    }
-
-    if let Some(recording) = finished_recording {
-        let chunks = RECORDING_CHUNKS
-            .lock()
-            .map_err(|_| "Recording chunk lock poisoned".to_string())?
-            .clone();
-
-        *LATEST_RECORDING
-            .lock()
-            .map_err(|_| "Latest recording lock poisoned".to_string())? = Some(RecordedAudio {
-            file_path: recording.file_path,
-            sample_rate: recording.sample_rate,
-            channels: recording.channels,
-            chunks,
-        });
     }
 
     if let Some(provider) = ACTIVE_STT_PROVIDER
@@ -621,33 +488,13 @@ fn play_recorded() -> Result<String, String> {
         .default_output_config()
         .map_err(|e| format!("Config error: {}", e))?;
     let output_config: cpal::StreamConfig = config.clone().into();
-
-    let samples = if let Some(recording) = LATEST_RECORDING
-        .lock()
-        .map_err(|_| "Latest recording lock poisoned".to_string())?
-        .clone()
-    {
-        if recording.file_path == file_path.to_string_lossy() {
-            prepare_playback_from_chunks(
-                &recording.chunks,
-                recording.sample_rate,
-                recording.channels,
-                config.sample_rate().0,
-                config.channels(),
-            )
-        } else {
-            let decoded = parse_wav_file(&file_path)?;
-            prepare_playback_samples(decoded, config.sample_rate().0, config.channels())
-        }
-    } else {
-        let decoded = parse_wav_file(&file_path)?;
-        prepare_playback_samples(decoded, config.sample_rate().0, config.channels())
-    };
+    let decoded = parse_wav_file(&file_path)?;
+    let samples = prepare_playback_samples(decoded, config.sample_rate().0, config.channels());
 
     let total_samples = samples.len();
-    let samples = Arc::new(samples);
-    let index = Arc::new(AtomicUsize::new(0));
-    let playing = Arc::new(AtomicBool::new(true));
+    let samples = std::sync::Arc::new(samples);
+    let index = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let playing = std::sync::Arc::new(AtomicBool::new(true));
 
     let stream = match config.sample_format() {
         cpal::SampleFormat::F32 => {
@@ -736,11 +583,7 @@ fn play_recorded() -> Result<String, String> {
     .map_err(|e| format!("Build error: {}", e))?;
 
     stream.play().map_err(|e| format!("Play error: {}", e))?;
-
-    unsafe {
-        let _lock = STREAM_MUTEX.lock();
-        PLAYBACK_STREAM = Some(stream);
-    }
+    replace_playback_stream(Some(stream));
 
     Ok(format!(
         "Playing: {} samples from {}",

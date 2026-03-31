@@ -36,7 +36,7 @@ interface SttSettingsView {
 }
 
 const MAX_LOGS = 12;
-const HOTKEY_LABEL = "Hold Cmd+Shift+Space";
+const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -55,8 +55,8 @@ function App() {
   const [finalTranscript, setFinalTranscript] = useState<string[]>([]);
   const [hotkeyStatus, setHotkeyStatus] = useState<HotkeySessionEvent>({
     state: "idle",
-    message: HOTKEY_LABEL,
-    shortcut: HOTKEY_LABEL,
+    message: `Hold ${DEFAULT_SHORTCUT}`,
+    shortcut: DEFAULT_SHORTCUT,
   });
   const [sttSettings, setSttSettings] = useState<SttSettingsView>({
     provider: "aliyun-bailian",
@@ -77,6 +77,7 @@ function App() {
       `[${new Date().toLocaleTimeString()}] ${message}`,
     ]);
   };
+  const hotkeyLabel = `Hold ${hotkeyStatus.shortcut}`;
 
   useEffect(() => {
     let unlistenAudio: (() => void) | undefined;
@@ -232,7 +233,7 @@ function App() {
 
         <div className="shortcut-card">
           <div>
-            <strong>{HOTKEY_LABEL}</strong>
+            <strong>{hotkeyLabel}</strong>
             <p>{hotkeyStatus.message}</p>
           </div>
           <span className={`badge badge-${hotkeyStatus.state}`}>{hotkeyStatus.state}</span>

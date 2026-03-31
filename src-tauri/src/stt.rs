@@ -1,3 +1,4 @@
+use crate::audio::convert_chunk_to_pcm16;
 use crate::native_hud;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -134,12 +135,7 @@ pub async fn wait_for_final_text(timeout_duration: Duration) -> Result<String, S
         }
 
         if finished || started.elapsed() >= timeout_duration {
-            let text = if finals.trim().is_empty() {
-                partial.trim().to_string()
-            } else {
-                finals.trim().to_string()
-            };
-            return Ok(text);
+            return Ok(combine_transcript(&finals, &partial));
         }
 
         tokio::time::sleep(Duration::from_millis(40)).await;
@@ -268,6 +264,10 @@ fn longest_common_prefix(left: &str, right: &str) -> String {
 
 fn partial_tail<'a>(partial: &'a str, stable_prefix: &str) -> &'a str {
     partial.strip_prefix(stable_prefix).unwrap_or(partial)
+}
+
+fn combine_transcript(finals: &str, partial: &str) -> String {
+    format!("{}{}", finals, partial).trim().to_string()
 }
 
 async fn test_connection(settings: StoredSttSettings) -> Result<(), String> {
@@ -406,7 +406,13 @@ async fn run_session(
             Some(command) = receiver.recv(), if !finish_sent => {
                 match command {
                     SttCommand::Audio { pcm, sample_rate, channels } => {
-                        let payload = convert_chunk_to_pcm16_mono_16k(&pcm, sample_rate, channels);
+                        let payload = convert_chunk_to_pcm16(
+                            &pcm,
+                            sample_rate,
+                            channels,
+                            TARGET_SAMPLE_RATE,
+                            TARGET_CHANNELS,
+                        );
                         if payload.is_empty() {
                             continue;
                         }
@@ -725,98 +731,4 @@ fn mask_api_key(value: &str) -> String {
     let visible = chars.len().min(4);
     let suffix: String = chars[chars.len() - visible..].iter().collect();
     format!("••••{}", suffix)
-}
-
-fn convert_chunk_to_pcm16_mono_16k(samples: &[i16], sample_rate: u32, channels: u16) -> Vec<u8> {
-    let normalized: Vec<f32> = samples.iter().copied().map(pcm_i16_to_f32).collect();
-    let mono = remix_channels(&normalized, channels, TARGET_CHANNELS);
-    let resampled = resample_interleaved(&mono, TARGET_CHANNELS, sample_rate, TARGET_SAMPLE_RATE);
-
-    resampled
-        .into_iter()
-        .map(normalize_f32_sample)
-        .flat_map(|sample| sample.to_le_bytes())
-        .collect()
-}
-
-fn normalize_f32_sample(sample: f32) -> i16 {
-    (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
-}
-
-fn pcm_i16_to_f32(sample: i16) -> f32 {
-    sample as f32 / i16::MAX as f32
-}
-
-fn remix_channels(samples: &[f32], source_channels: u16, target_channels: u16) -> Vec<f32> {
-    if source_channels == target_channels {
-        return samples.to_vec();
-    }
-
-    let source_channels = source_channels as usize;
-    let target_channels = target_channels as usize;
-
-    if source_channels == 0 || target_channels == 0 {
-        return Vec::new();
-    }
-
-    let mut remixed = Vec::with_capacity(samples.len() / source_channels * target_channels);
-
-    for frame in samples.chunks_exact(source_channels) {
-        if target_channels == 1 {
-            remixed.push(frame.iter().copied().sum::<f32>() / source_channels as f32);
-            continue;
-        }
-
-        if source_channels == 1 {
-            remixed.extend(std::iter::repeat_n(frame[0], target_channels));
-            continue;
-        }
-
-        for channel in 0..target_channels {
-            remixed.push(frame[channel.min(source_channels - 1)]);
-        }
-    }
-
-    remixed
-}
-
-fn resample_interleaved(
-    samples: &[f32],
-    channels: u16,
-    source_rate: u32,
-    target_rate: u32,
-) -> Vec<f32> {
-    if source_rate == target_rate || samples.is_empty() {
-        return samples.to_vec();
-    }
-
-    let channels = channels as usize;
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    let source_frames = samples.len() / channels;
-    if source_frames <= 1 {
-        return samples.to_vec();
-    }
-
-    let target_frames =
-        ((source_frames as f64 * target_rate as f64) / source_rate as f64).round() as usize;
-    let last_frame = source_frames - 1;
-    let mut resampled = Vec::with_capacity(target_frames * channels);
-
-    for target_index in 0..target_frames {
-        let source_position = target_index as f64 * source_rate as f64 / target_rate as f64;
-        let base_index = source_position.floor() as usize;
-        let next_index = (base_index + 1).min(last_frame);
-        let fraction = (source_position - base_index as f64) as f32;
-
-        for channel in 0..channels {
-            let base_sample = samples[base_index * channels + channel];
-            let next_sample = samples[next_index * channels + channel];
-            resampled.push(base_sample + (next_sample - base_sample) * fraction);
-        }
-    }
-
-    resampled
 }
