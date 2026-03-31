@@ -32,13 +32,13 @@ struct PiRpcLaunchConfig {
 }
 
 impl PiRpcLaunchConfig {
-    fn for_mode(mode: PiRpcLaunchMode, project_root: &Path) -> Result<Self, String> {
+    fn for_mode(mode: PiRpcLaunchMode, app_root: &Path) -> Result<Self, String> {
         match mode {
             PiRpcLaunchMode::DictationFast => Ok(Self {
                 mode,
                 use_session: false,
                 session_path: None,
-                disable_tools: false,
+                disable_tools: true,
                 disable_extensions: true,
                 disable_skills: true,
                 disable_prompt_templates: true,
@@ -54,10 +54,10 @@ impl PiRpcLaunchConfig {
                 disable_skills: false,
                 disable_prompt_templates: false,
                 disable_themes: false,
-                extension_paths: vec![resolve_voice_feedback_extension(project_root)?],
+                extension_paths: vec![resolve_voice_feedback_extension(app_root)?],
             }),
             PiRpcLaunchMode::AgentSession => {
-                let session_path = project_root.join(".pi/sessions/voice-dictation.jsonl");
+                let session_path = app_root.join(".pi/sessions/voice-dictation.jsonl");
                 Ok(Self {
                     mode,
                     use_session: true,
@@ -67,7 +67,7 @@ impl PiRpcLaunchConfig {
                     disable_skills: false,
                     disable_prompt_templates: false,
                     disable_themes: false,
-                    extension_paths: vec![resolve_voice_feedback_extension(project_root)?],
+                    extension_paths: vec![resolve_voice_feedback_extension(app_root)?],
                 })
             }
         }
@@ -86,6 +86,7 @@ struct PiRpcProcess {
 }
 
 static REUSABLE_PI_RPC: OnceLock<Mutex<Option<PiRpcProcess>>> = OnceLock::new();
+static APP_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 struct PiRpcTrace {
     started_at: Instant,
@@ -162,6 +163,30 @@ pub fn warmup() {
     }
 }
 
+pub fn shutdown_reusable_process() {
+    let Some(slot) = REUSABLE_PI_RPC.get() else {
+        return;
+    };
+
+    let mut guard = match slot.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let Some(mut process) = guard.take() else {
+        return;
+    };
+
+    eprintln!("[pi-rpc] shutting down reusable process");
+    shutdown_child(&mut process.child);
+}
+
+pub fn set_app_root(path: PathBuf) {
+    let normalized = path.canonicalize().unwrap_or(path);
+    let _ = APP_ROOT.set(normalized.clone());
+    eprintln!("[pi-rpc] app root set to {}", normalized.display());
+}
+
 fn refine_text_with_fresh_process(trimmed: &str) -> Result<String, String> {
     let mut trace = PiRpcTrace::new();
     let (mut child, mut stdin, rx, stderr_buffer) = spawn_pi_rpc()?;
@@ -234,12 +259,12 @@ fn spawn_pi_rpc(
     Arc<Mutex<String>>,
 ), String> {
     let pi_path = resolve_pi_path();
-    let project_root = resolve_project_root()?;
+    let app_root = resolve_app_root()?;
     let launch_mode = current_launch_mode();
-    let config = PiRpcLaunchConfig::for_mode(launch_mode, &project_root)?;
+    let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root)?;
     let mut command = Command::new(&pi_path);
 
-    command.current_dir(&project_root).arg("--mode").arg("rpc");
+    command.current_dir(&app_root).arg("--mode").arg("rpc");
 
     if config.use_session {
         let session_path = config
@@ -290,7 +315,7 @@ fn spawn_pi_rpc(
     eprintln!(
         "[pi-rpc] launch mode={:?} cwd={} extensions={} no_tools={} no_extensions={} no_skills={} no_prompt_templates={} no_themes={} pi={}",
         config.mode,
-        project_root.display(),
+        app_root.display(),
         extension_log,
         config.disable_tools,
         config.disable_extensions,
@@ -399,25 +424,68 @@ fn should_reuse_process() -> bool {
         .unwrap_or(true)
 }
 
-fn resolve_project_root() -> Result<PathBuf, String> {
-    let cwd = env::current_dir().map_err(|e| format!("failed to resolve current dir: {}", e))?;
+fn resolve_app_root() -> Result<PathBuf, String> {
+    if let Some(path) = env::var("VOICESTREAM_APP_ROOT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let normalized = path.canonicalize().unwrap_or(path);
+        return Ok(normalized);
+    }
 
-    let candidates = [cwd.clone(), cwd.join("..")];
+    if let Some(path) = APP_ROOT.get() {
+        return Ok(path.clone());
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            candidates.push(parent.to_path_buf());
+            if let Some(grandparent) = parent.parent() {
+                candidates.push(grandparent.to_path_buf());
+            }
+        }
+    }
+
+    let cwd = env::current_dir().map_err(|e| format!("failed to resolve current dir: {}", e))?;
+    candidates.push(cwd.clone());
+    candidates.push(cwd.join(".."));
+
     for candidate in candidates {
         let normalized = candidate.canonicalize().unwrap_or(candidate.clone());
-        if normalized.join(".pi").exists() {
+        if normalized.join("pi-extensions").exists()
+            || normalized.join("src-tauri/tauri.conf.json").exists()
+            || normalized.join("package.json").exists()
+        {
             return Ok(normalized);
         }
     }
 
-    Err(format!(
-        "failed to locate project root containing .pi from cwd {}",
-        cwd.display()
-    ))
+    Ok(cwd)
 }
 
-fn resolve_voice_feedback_extension(project_root: &Path) -> Result<PathBuf, String> {
-    let extension = project_root.join(".pi/extensions/voice-feedback.ts");
+fn resolve_voice_feedback_extension(app_root: &Path) -> Result<PathBuf, String> {
+    if let Some(path) = env::var("VOICESTREAM_PI_VOICE_EXTENSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let normalized = path.canonicalize().unwrap_or(path.clone());
+        if normalized.exists() {
+            return Ok(normalized);
+        }
+
+        return Err(format!(
+            "voice feedback extension from VOICESTREAM_PI_VOICE_EXTENSION not found at {}",
+            path.display()
+        ));
+    }
+
+    let extension = app_root.join("pi-extensions/voice-feedback.ts");
     if extension.exists() {
         Ok(extension)
     } else {

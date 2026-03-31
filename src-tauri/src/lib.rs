@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 use std::{env, thread};
 use stt::SttProvider;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 const HOTKEY_SHORTCUT: &str = "Cmd+Shift+Space";
@@ -1010,6 +1010,13 @@ fn handle_hotkey_released(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                let candidate = resource_dir.join("pi-extensions");
+                if candidate.exists() {
+                    pi_rpc::set_app_root(resource_dir);
+                }
+            }
+
             #[cfg(desktop)]
             {
                 native_hud::initialize(&app.handle());
@@ -1052,6 +1059,11 @@ pub fn run() {
             stop_recording,
             play_recorded,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if matches!(event, RunEvent::Exit) {
+                pi_rpc::shutdown_reusable_process()
+            }
+        });
 }

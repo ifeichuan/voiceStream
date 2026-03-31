@@ -36,6 +36,8 @@ Environment overrides:
   VOICESTREAM_PI_MODE            Used by dev commands when explicitly set
   VOICESTREAM_PI_BENCH_ROUNDS    Default bench rounds: 5
   VOICESTREAM_PI_STARTUP_TEST    Optional startup self-test toggle
+  VOICESTREAM_APP_ROOT           Override app root used as pi rpc cwd
+  VOICESTREAM_PI_VOICE_EXTENSION Override voice extension path passed with -e
 
 Examples:
   scripts/voicestream-dev.sh dev-fast
@@ -129,6 +131,8 @@ VOICESTREAM_PI_MODEL=$model
 VOICESTREAM_PI_BENCH_ROUNDS_DEFAULT=$bench_rounds_default
 VOICESTREAM_PI_MODE=${VOICESTREAM_PI_MODE:-<unset>}
 VOICESTREAM_PI_STARTUP_TEST=${VOICESTREAM_PI_STARTUP_TEST:-<unset>}
+VOICESTREAM_APP_ROOT=${VOICESTREAM_APP_ROOT:-<unset>}
+VOICESTREAM_PI_VOICE_EXTENSION=${VOICESTREAM_PI_VOICE_EXTENSION:-<unset>}
 EOF
     ;;
   help|--help|-h)
