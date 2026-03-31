@@ -19,8 +19,13 @@ On Unix-like systems the file is written with `0600` permissions.
 Current behavior:
 
 - recording still uses the native Tauri audio pipeline
+- hold `Cmd+Shift+Space` to start recording, release to stop
 - audio chunks are downmixed to mono, resampled to 16 kHz PCM, and streamed to Bailian during recording
-- partial and final transcripts are pushed back to the UI in realtime
+- when transcription finishes, the app pastes the final text into the currently focused app through the macOS clipboard + `Cmd+V` flow
+
+Notes:
+
+- automatic paste uses `osascript`, so macOS Accessibility permission may be required the first time
 
 ## Recommended IDE Setup
 

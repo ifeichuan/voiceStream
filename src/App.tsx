@@ -10,6 +10,12 @@ interface AudioChunk {
   size: number;
 }
 
+interface HotkeySessionEvent {
+  state: string;
+  message: string;
+  shortcut: string;
+}
+
 interface SttTranscriptEvent {
   text: string;
   is_final: boolean;
@@ -30,6 +36,7 @@ interface SttSettingsView {
 }
 
 const MAX_LOGS = 12;
+const HOTKEY_LABEL = "Hold Cmd+Shift+Space";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -46,6 +53,11 @@ function App() {
   const [sttStatus, setSttStatus] = useState("idle");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState<string[]>([]);
+  const [hotkeyStatus, setHotkeyStatus] = useState<HotkeySessionEvent>({
+    state: "idle",
+    message: HOTKEY_LABEL,
+    shortcut: HOTKEY_LABEL,
+  });
   const [sttSettings, setSttSettings] = useState<SttSettingsView>({
     provider: "aliyun-bailian",
     api_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
@@ -70,6 +82,7 @@ function App() {
     let unlistenAudio: (() => void) | undefined;
     let unlistenStt: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
+    let unlistenHotkey: (() => void) | undefined;
 
     addLog("Ready");
 
@@ -88,13 +101,9 @@ function App() {
       setLastChunkInfo(
         `${chunk.sample_rate} Hz · ${chunk.channels} ch · ${Math.round(chunk.size / 1024)} KB`,
       );
-    })
-      .then((dispose) => {
-        unlistenAudio = dispose;
-      })
-      .catch((error) => {
-        addLog(`Audio listener failed: ${getErrorMessage(error)}`);
-      });
+    }).then((dispose) => {
+      unlistenAudio = dispose;
+    });
 
     void listen<SttTranscriptEvent>("stt-transcript", (event) => {
       const { text, is_final } = event.payload;
@@ -116,10 +125,19 @@ function App() {
       unlistenStatus = dispose;
     });
 
+    void listen<HotkeySessionEvent>("hotkey-session", (event) => {
+      setHotkeyStatus(event.payload);
+      setIsRecording(event.payload.state === "recording");
+      addLog(`Hotkey ${event.payload.state}: ${event.payload.message}`);
+    }).then((dispose) => {
+      unlistenHotkey = dispose;
+    });
+
     return () => {
       unlistenAudio?.();
       unlistenStt?.();
       unlistenStatus?.();
+      unlistenHotkey?.();
     };
   }, []);
 
@@ -204,12 +222,21 @@ function App() {
 
   return (
     <main className="app">
-      <section className="panel">
+      <section className="panel hero-panel">
         <p className="eyebrow">VoiceStream</p>
-        <h1>Minimal native recorder</h1>
+        <h1>Realtime dictation bridge</h1>
         <p className="summary">
-          Record from the default input, stop, then play the latest capture.
+          Hold the global shortcut to record, stream to Bailian, then auto-paste the final
+          transcript into the focused app.
         </p>
+
+        <div className="shortcut-card">
+          <div>
+            <strong>{HOTKEY_LABEL}</strong>
+            <p>{hotkeyStatus.message}</p>
+          </div>
+          <span className={`badge badge-${hotkeyStatus.state}`}>{hotkeyStatus.state}</span>
+        </div>
 
         <div className="actions">
           <button onClick={isRecording ? stopRecording : startRecording}>
@@ -237,15 +264,6 @@ function App() {
       </section>
 
       <section className="panel">
-        <h2>Log</h2>
-        <div className="log">
-          {logs.map((line, index) => (
-            <div key={`${line}-${index}`}>{line}</div>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel">
         <h2>Transcript</h2>
         <p className="summary">Aliyun Bailian STT status: {sttStatus}</p>
         <div className="transcript">
@@ -262,8 +280,8 @@ function App() {
       <section className="panel">
         <h2>Settings</h2>
         <p className="summary">
-          Provider: {sttSettings.provider}. Credentials are stored in the local app
-          support directory and read by Rust at runtime.
+          Provider: {sttSettings.provider}. Credentials are stored in the local app support
+          directory and read by Rust at runtime.
         </p>
 
         <div className="settings-grid">
@@ -273,7 +291,9 @@ function App() {
               type="password"
               value={apiKeyInput}
               onChange={(event) => setApiKeyInput(event.target.value)}
-              placeholder={sttSettings.has_api_key ? "Saved locally. Leave blank to keep it." : "sk-..."}
+              placeholder={
+                sttSettings.has_api_key ? "Saved locally. Leave blank to keep it." : "sk-..."
+              }
             />
             {sttSettings.has_api_key && (
               <small className="field-hint">Saved key: {sttSettings.api_key_hint}</small>
@@ -323,6 +343,15 @@ function App() {
         </div>
 
         <p className="summary">{settingsStatus}</p>
+      </section>
+
+      <section className="panel">
+        <h2>Log</h2>
+        <div className="log">
+          {logs.map((line, index) => (
+            <div key={`${line}-${index}`}>{line}</div>
+          ))}
+        </div>
       </section>
     </main>
   );

@@ -1,8 +1,10 @@
+use crate::native_hud;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
@@ -17,6 +19,27 @@ const DEFAULT_API_ENDPOINT: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/infer
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
 const STORE_FILE_NAME: &str = "credentials.json";
+static TRANSCRIPT_STATE: Mutex<TranscriptState> = Mutex::new(TranscriptState::new());
+
+struct TranscriptState {
+    finals: Vec<String>,
+    partial: String,
+    stable_partial_prefix: String,
+    finished: bool,
+    error: Option<String>,
+}
+
+impl TranscriptState {
+    const fn new() -> Self {
+        Self {
+            finals: Vec::new(),
+            partial: String::new(),
+            stable_partial_prefix: String::new(),
+            finished: true,
+            error: None,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SttTranscriptEvent {
@@ -65,6 +88,62 @@ struct StoredCredentialFile {
 pub trait SttProvider: Send {
     fn push_chunk(&self, pcm: Vec<i16>, sample_rate: u32, channels: u16) -> Result<(), String>;
     fn finish(&self) -> Result<(), String>;
+}
+
+pub fn reset_runtime_state() {
+    if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
+        state.finals.clear();
+        state.partial.clear();
+        state.stable_partial_prefix.clear();
+        state.finished = false;
+        state.error = None;
+    }
+}
+
+pub fn mark_runtime_finished() {
+    if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
+        state.finished = true;
+    }
+}
+
+pub fn mark_runtime_error(message: &str) {
+    if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
+        state.error = Some(message.to_string());
+        state.finished = true;
+    }
+}
+
+pub async fn wait_for_final_text(timeout_duration: Duration) -> Result<String, String> {
+    let started = std::time::Instant::now();
+
+    loop {
+        let (finished, error, finals, partial) = {
+            let state = TRANSCRIPT_STATE
+                .lock()
+                .map_err(|_| "Transcript state lock poisoned".to_string())?;
+            (
+                state.finished,
+                state.error.clone(),
+                state.finals.concat(),
+                state.partial.clone(),
+            )
+        };
+
+        if let Some(error) = error {
+            return Err(error);
+        }
+
+        if finished || started.elapsed() >= timeout_duration {
+            let text = if finals.trim().is_empty() {
+                partial.trim().to_string()
+            } else {
+                finals.trim().to_string()
+            };
+            return Ok(text);
+        }
+
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
 }
 
 enum SttCommand {
@@ -149,6 +228,7 @@ pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttP
     let settings = match read_stored_settings(&app)? {
         Some(value) if !value.api_key.is_empty() => value,
         _ => {
+            mark_runtime_finished();
             emit_status(
                 &app,
                 "disabled: save Bailian API key in Settings to enable realtime STT",
@@ -157,10 +237,7 @@ pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttP
         }
     };
 
-    Ok(Some(Box::new(AliyunBailianSttProvider::new(
-        app,
-        settings,
-    ))))
+    Ok(Some(Box::new(AliyunBailianSttProvider::new(app, settings))))
 }
 
 impl AliyunBailianSttProvider {
@@ -169,12 +246,28 @@ impl AliyunBailianSttProvider {
 
         tauri::async_runtime::spawn(async move {
             if let Err(error) = run_session(app.clone(), settings, receiver).await {
+                mark_runtime_error(&error);
                 emit_status(&app, &format!("error: {}", error));
             }
         });
 
         Self { sender }
     }
+}
+
+fn longest_common_prefix(left: &str, right: &str) -> String {
+    let mut prefix = String::new();
+    for (l, r) in left.chars().zip(right.chars()) {
+        if l != r {
+            break;
+        }
+        prefix.push(l);
+    }
+    prefix
+}
+
+fn partial_tail<'a>(partial: &'a str, stable_prefix: &str) -> &'a str {
+    partial.strip_prefix(stable_prefix).unwrap_or(partial)
 }
 
 async fn test_connection(settings: StoredSttSettings) -> Result<(), String> {
@@ -247,7 +340,9 @@ async fn test_connection(settings: StoredSttSettings) -> Result<(), String> {
                 other => Err(format!("Unexpected handshake event: {}", other)),
             }
         }
-        Some(Ok(Message::Close(_))) => Err("Connection closed before handshake completed".to_string()),
+        Some(Ok(Message::Close(_))) => {
+            Err("Connection closed before handshake completed".to_string())
+        }
         Some(Ok(_)) => Err("Unexpected non-text handshake response".to_string()),
         Some(Err(error)) => Err(format!("websocket read failed: {}", error)),
         None => Err("Connection closed before handshake completed".to_string()),
@@ -424,18 +519,48 @@ async fn handle_server_event(
                         .get("sentence_end")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
+                    let (finalized_text, partial_text) = if let Ok(mut state) =
+                        TRANSCRIPT_STATE.lock()
+                    {
+                        if is_final {
+                            state.finals.push(text.clone());
+                            state.partial.clear();
+                            state.stable_partial_prefix.clear();
+                        } else {
+                            let candidate_prefix = longest_common_prefix(&state.partial, &text);
+                            if !candidate_prefix.is_empty() {
+                                state.stable_partial_prefix = candidate_prefix;
+                            } else if !text.starts_with(&state.stable_partial_prefix) {
+                                state.stable_partial_prefix.clear();
+                            }
+                            state.partial = text.clone();
+                        }
+
+                        let finalized_text =
+                            format!("{}{}", state.finals.concat(), state.stable_partial_prefix);
+                        let partial_text =
+                            partial_tail(&state.partial, &state.stable_partial_prefix).to_string();
+                        (finalized_text, partial_text)
+                    } else {
+                        (String::new(), text.clone())
+                    };
                     let event = SttTranscriptEvent { text, is_final };
+                    native_hud::update_transcript(app, &finalized_text, &partial_text);
                     let _ = app.emit("stt-transcript", event);
                 }
             }
         }
-        "task-finished" => return Ok(true),
+        "task-finished" => {
+            mark_runtime_finished();
+            return Ok(true);
+        }
         "task-failed" => {
             let message = payload
                 .get("header")
                 .and_then(|header| header.get("error_message"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown task failure");
+            mark_runtime_error(message);
             return Err(message.to_string());
         }
         _ => {}
@@ -495,8 +620,8 @@ fn read_stored_settings(app: &AppHandle) -> Result<Option<StoredSttSettings>, St
         return Ok(None);
     }
 
-    let content =
-        fs::read_to_string(&path).map_err(|e| format!("failed to read credentials store: {}", e))?;
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("failed to read credentials store: {}", e))?;
     let file: StoredCredentialFile =
         serde_json::from_str(&content).map_err(|e| format!("invalid credentials store: {}", e))?;
     Ok(file.vs_stt_bailian)
@@ -521,7 +646,10 @@ fn write_stored_settings(app: &AppHandle, settings: &StoredSttSettings) -> Resul
     Ok(())
 }
 
-fn merge_settings(existing: Option<StoredSttSettings>, input: SttSettingsInput) -> StoredSttSettings {
+fn merge_settings(
+    existing: Option<StoredSttSettings>,
+    input: SttSettingsInput,
+) -> StoredSttSettings {
     let existing = existing.unwrap_or_else(default_settings);
     let api_key = sanitize(&input.api_key).unwrap_or(existing.api_key);
 
@@ -536,9 +664,7 @@ fn merge_settings(existing: Option<StoredSttSettings>, input: SttSettingsInput) 
     }
 }
 
-fn build_ws_request(
-    settings: &StoredSttSettings,
-) -> Result<http::Request<()>, String> {
+fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, String> {
     let mut request = settings
         .api_endpoint
         .clone()

@@ -1,12 +1,18 @@
+mod native_hud;
 mod stt;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use std::io::{Seek, SeekFrom, Write};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+
+const HOTKEY_SHORTCUT: &str = "Cmd+Shift+Space";
+const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AudioChunk {
@@ -15,6 +21,18 @@ pub struct AudioChunk {
     pub sample_rate: u32,
     pub channels: u16,
     pub size: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct AudioLevelEvent {
+    pub level: f32,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct HotkeySessionEvent {
+    pub state: String,
+    pub message: String,
+    pub shortcut: String,
 }
 
 #[derive(Clone)]
@@ -46,6 +64,7 @@ static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
 static RECORDING_CHUNKS: Mutex<Vec<Vec<i16>>> = Mutex::new(Vec::new());
 static LATEST_RECORDING: Mutex<Option<RecordedAudio>> = Mutex::new(None);
 static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
+static HOTKEY_RECORDING: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 fn get_stt_settings(app: AppHandle) -> Result<stt::SttSettingsView, String> {
@@ -141,7 +160,10 @@ fn parse_wav_file(file_path: &std::path::Path) -> Result<DecodedAudio, String> {
                 return Err("Invalid WAV fmt chunk".to_string());
             }
 
-            audio_format = Some(u16::from_le_bytes([data[chunk_start], data[chunk_start + 1]]));
+            audio_format = Some(u16::from_le_bytes([
+                data[chunk_start],
+                data[chunk_start + 1],
+            ]));
             channels = Some(u16::from_le_bytes([
                 data[chunk_start + 2],
                 data[chunk_start + 3],
@@ -326,7 +348,10 @@ fn finalize_recording_file(recording: &ActiveRecording) -> Result<(), String> {
 
 fn write_pcm_chunk(file_path: &str, samples: &[i16]) {
     if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(file_path) {
-        let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect();
+        let bytes: Vec<u8> = samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
         let _ = file.write_all(&bytes);
     }
 }
@@ -346,8 +371,36 @@ fn emit_chunk(app: &AppHandle, sample_rate: u32, channels: u16, size: usize) {
     let _ = app.emit("audio-chunk", chunk);
 }
 
-#[tauri::command]
-fn start_recording(app: AppHandle) -> Result<String, String> {
+fn emit_audio_level(app: &AppHandle, samples: &[i16]) {
+    if samples.is_empty() {
+        return;
+    }
+
+    let mean_square = samples
+        .iter()
+        .map(|sample| {
+            let normalized = *sample as f32 / i16::MAX as f32;
+            normalized * normalized
+        })
+        .sum::<f32>()
+        / samples.len() as f32;
+    let level = (mean_square.sqrt() * 9.0).clamp(0.0, 1.0);
+    native_hud::update_level(app, level);
+    let _ = app.emit("audio-level", AudioLevelEvent { level });
+}
+
+fn emit_hotkey_state(app: &AppHandle, state: &str, message: &str) {
+    let _ = app.emit(
+        "hotkey-session",
+        HotkeySessionEvent {
+            state: state.to_string(),
+            message: message.to_string(),
+            shortcut: HOTKEY_SHORTCUT.to_string(),
+        },
+    );
+}
+
+fn start_recording_internal(app: AppHandle) -> Result<String, String> {
     if STREAM_RUNNING.load(Ordering::SeqCst) {
         return Err("Already recording".to_string());
     }
@@ -374,6 +427,7 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
         .map_err(|_| "Recording chunk lock poisoned".to_string())?
         .clear();
 
+    stt::reset_runtime_state();
     let provider = stt::create_default_stt_provider(app.clone())?;
     *ACTIVE_STT_PROVIDER
         .lock()
@@ -388,13 +442,10 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
             device.build_input_stream(
                 &config.clone().into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let chunk: Vec<i16> = data
-                        .iter()
-                        .copied()
-                        .map(normalize_f32_sample)
-                        .collect();
+                    let chunk: Vec<i16> = data.iter().copied().map(normalize_f32_sample).collect();
                     let size = chunk.len() * std::mem::size_of::<i16>();
                     emit_chunk(&app, sample_rate, channels, size);
+                    emit_audio_level(&app, &chunk);
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
                     }
@@ -417,6 +468,7 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
                     let chunk = data.to_vec();
                     let size = chunk.len() * std::mem::size_of::<i16>();
                     emit_chunk(&app, sample_rate, channels, size);
+                    emit_audio_level(&app, &chunk);
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
                     }
@@ -436,13 +488,10 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
             device.build_input_stream(
                 &config.clone().into(),
                 move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    let chunk: Vec<i16> = data
-                        .iter()
-                        .copied()
-                        .map(normalize_u16_sample)
-                        .collect();
+                    let chunk: Vec<i16> = data.iter().copied().map(normalize_u16_sample).collect();
                     let size = chunk.len() * std::mem::size_of::<i16>();
                     emit_chunk(&app, sample_rate, channels, size);
+                    emit_audio_level(&app, &chunk);
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
                     }
@@ -483,8 +532,7 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
     ))
 }
 
-#[tauri::command]
-fn stop_recording() -> Result<String, String> {
+fn stop_recording_internal() -> Result<String, String> {
     if !STREAM_RUNNING.load(Ordering::SeqCst) {
         return Err("Not recording".to_string());
     }
@@ -527,9 +575,21 @@ fn stop_recording() -> Result<String, String> {
         .take()
     {
         let _ = provider.finish();
+    } else {
+        stt::mark_runtime_finished();
     }
 
     Ok("Recording stopped".to_string())
+}
+
+#[tauri::command]
+fn start_recording(app: AppHandle) -> Result<String, String> {
+    start_recording_internal(app)
+}
+
+#[tauri::command]
+fn stop_recording() -> Result<String, String> {
+    stop_recording_internal()
 }
 
 #[tauri::command]
@@ -539,8 +599,18 @@ fn play_recorded() -> Result<String, String> {
         .and_then(|entries| {
             entries
                 .filter_map(|entry| entry.ok())
-                .filter(|entry| entry.file_name().to_string_lossy().starts_with("voicestream_"))
-                .max_by_key(|entry| entry.metadata().ok().and_then(|metadata| metadata.modified().ok()))
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("voicestream_")
+                })
+                .max_by_key(|entry| {
+                    entry
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| metadata.modified().ok())
+                })
         })
         .map(|entry| entry.path())
         .ok_or("No recording found")?;
@@ -679,9 +749,170 @@ fn play_recorded() -> Result<String, String> {
     ))
 }
 
+fn write_clipboard_text(text: &str) -> Result<(), String> {
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to launch pbcopy: {}", e))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| format!("Failed to write clipboard content: {}", e))?;
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("pbcopy wait failed: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("pbcopy returned non-zero exit status".to_string())
+    }
+}
+
+fn read_clipboard_text() -> Option<String> {
+    let output = Command::new("pbpaste").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout).ok()
+}
+
+fn trigger_cmd_v() -> Result<(), String> {
+    let status = Command::new("osascript")
+        .arg("-e")
+        .arg(r#"tell application "System Events" to keystroke "v" using command down"#)
+        .status()
+        .map_err(|e| format!("Failed to launch osascript: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Paste keystroke failed. Grant Accessibility access if needed.".to_string())
+    }
+}
+
+fn paste_text_to_cursor(text: &str) -> Result<(), String> {
+    let previous_clipboard = read_clipboard_text();
+    write_clipboard_text(text)?;
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    let paste_result = trigger_cmd_v();
+    std::thread::sleep(std::time::Duration::from_millis(120));
+
+    match previous_clipboard {
+        Some(previous) => {
+            let _ = write_clipboard_text(&previous);
+        }
+        None => {
+            let _ = write_clipboard_text("");
+        }
+    }
+
+    paste_result
+}
+
+fn handle_hotkey_pressed(app: &AppHandle) {
+    if HOTKEY_RECORDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    match start_recording_internal(app.clone()) {
+        Ok(_) => {
+            native_hud::show_recording(app);
+            emit_hotkey_state(app, "recording", "Listening...");
+        }
+        Err(error) => {
+            HOTKEY_RECORDING.store(false, Ordering::SeqCst);
+            native_hud::show_error(app, &error);
+            emit_hotkey_state(app, "error", &error);
+        }
+    }
+}
+
+fn schedule_hide_hud(app: &AppHandle, delay_ms: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+        native_hud::hide(&app);
+    });
+}
+
+fn handle_hotkey_released(app: &AppHandle) {
+    if !HOTKEY_RECORDING.swap(false, Ordering::SeqCst) {
+        return;
+    }
+
+    if let Err(error) = stop_recording_internal() {
+        native_hud::show_error(app, &error);
+        schedule_hide_hud(app, 900);
+        emit_hotkey_state(app, "error", &error);
+        return;
+    }
+
+    native_hud::show_processing(app);
+    emit_hotkey_state(app, "processing", "Transcribing...");
+
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match stt::wait_for_final_text(tokio::time::Duration::from_millis(HOTKEY_PASTE_WAIT_MS))
+            .await
+        {
+            Ok(text) if !text.trim().is_empty() => match paste_text_to_cursor(&text) {
+                Ok(()) => {
+                    native_hud::show_success(&app, &text);
+                    schedule_hide_hud(&app, 850);
+                    emit_hotkey_state(&app, "pasted", "Pasted to focused app");
+                }
+                Err(error) => {
+                    native_hud::show_error(&app, &error);
+                    schedule_hide_hud(&app, 1100);
+                    emit_hotkey_state(&app, "error", &error);
+                }
+            },
+            Ok(_) => {
+                native_hud::show_error(&app, "No transcript");
+                schedule_hide_hud(&app, 900);
+                emit_hotkey_state(&app, "error", "No transcript captured");
+            }
+            Err(error) => {
+                native_hud::show_error(&app, &error);
+                schedule_hide_hud(&app, 1100);
+                emit_hotkey_state(&app, "error", &error);
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                native_hud::initialize(&app.handle());
+                let hold_to_talk_shortcut =
+                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_shortcut(hold_to_talk_shortcut.clone())?
+                        .with_handler(move |app, shortcut, event| {
+                            if shortcut == &hold_to_talk_shortcut {
+                                match event.state() {
+                                    ShortcutState::Pressed => handle_hotkey_pressed(app),
+                                    ShortcutState::Released => handle_hotkey_released(app),
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_stt_settings,
             save_stt_settings,

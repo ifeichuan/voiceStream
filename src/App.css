@@ -1,7 +1,9 @@
 :root {
   font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
   color: #152033;
-  background: #f4f7fb;
+  background:
+    radial-gradient(circle at top left, rgba(24, 110, 255, 0.12), transparent 28%),
+    linear-gradient(180deg, #f6f8fc 0%, #edf3fb 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -12,45 +14,56 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
 }
 
-button {
-  font: inherit;
-  cursor: pointer;
-}
-
+button,
 input {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
 .app {
-  max-width: 760px;
+  max-width: 840px;
   margin: 0 auto;
-  padding: 48px 16px;
+  padding: 40px 16px 56px;
 }
 
 .panel {
   padding: 24px;
-  border: 1px solid #d7e0eb;
-  border-radius: 18px;
-  background: #ffffff;
-  box-shadow: 0 16px 36px rgba(17, 28, 45, 0.08);
+  border: 1px solid rgba(195, 210, 231, 0.8);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 24px 60px rgba(28, 39, 69, 0.08);
+  backdrop-filter: blur(20px);
 }
 
 .panel + .panel {
   margin-top: 16px;
 }
 
+.hero-panel {
+  padding-top: 28px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
-  color: #3b5ccc;
-  font-size: 0.9rem;
+  color: #2d5eff;
+  font-size: 0.82rem;
   font-weight: 700;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 h1,
@@ -60,33 +73,95 @@ h2,
 }
 
 h1 {
-  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.02;
+}
+
+h2 {
+  font-size: 1.15rem;
 }
 
 .summary {
   margin-top: 10px;
   color: #5d6b7f;
+  line-height: 1.5;
+}
+
+.shortcut-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #152033 0%, #223a73 100%);
+  color: #f7faff;
+}
+
+.shortcut-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.shortcut-card p {
+  margin: 0;
+  color: rgba(247, 250, 255, 0.76);
+}
+
+.badge {
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.badge-idle {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.badge-recording {
+  background: rgba(55, 206, 132, 0.18);
+  color: #d9ffea;
+}
+
+.badge-processing {
+  background: rgba(255, 201, 74, 0.2);
+  color: #fff0c3;
+}
+
+.badge-pasted {
+  background: rgba(84, 173, 255, 0.22);
+  color: #dff1ff;
+}
+
+.badge-error {
+  background: rgba(255, 110, 110, 0.2);
+  color: #ffd8d8;
 }
 
 .actions {
   display: flex;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 22px;
   flex-wrap: wrap;
 }
 
 .actions button {
   padding: 12px 18px;
-  border: 1px solid #cbd5e1;
-  border-radius: 12px;
-  background: #ffffff;
+  border: 1px solid #c8d4e5;
+  border-radius: 14px;
+  background: #fff;
   color: #152033;
 }
 
 .actions button:first-child {
   background: #152033;
   border-color: #152033;
-  color: #ffffff;
+  color: #fff;
 }
 
 .actions button:disabled {
@@ -102,7 +177,7 @@ h1 {
 
 .stats div {
   padding-top: 12px;
-  border-top: 1px solid #e6ecf3;
+  border-top: 1px solid #e5ebf4;
 }
 
 .stats dt {
@@ -119,12 +194,12 @@ h1 {
 .log {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 16px;
   background: #0f172a;
   color: #bfe7c6;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.9rem;
-  min-height: 120px;
+  min-height: 140px;
 }
 
 .log div + div {
@@ -134,9 +209,9 @@ h1 {
 .transcript {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 16px;
   border: 1px solid #e6ecf3;
-  background: #f8fafc;
+  background: rgba(248, 250, 252, 0.95);
   min-height: 120px;
 }
 
@@ -145,7 +220,7 @@ h1 {
 }
 
 .partial {
-  color: #3b5ccc;
+  color: #2d5eff;
 }
 
 .placeholder {
@@ -176,7 +251,18 @@ h1 {
 .settings-grid input {
   padding: 12px 14px;
   border: 1px solid #cbd5e1;
-  border-radius: 12px;
-  background: #ffffff;
+  border-radius: 14px;
+  background: #fff;
   color: #152033;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding-top: 24px;
+  }
+
+  .shortcut-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
