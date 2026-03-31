@@ -10,6 +10,25 @@ interface AudioChunk {
   size: number;
 }
 
+interface SttTranscriptEvent {
+  text: string;
+  is_final: boolean;
+}
+
+interface SttStatusEvent {
+  provider: string;
+  status: string;
+}
+
+interface SttSettingsView {
+  provider: string;
+  api_endpoint: string;
+  model: string;
+  workspace_id: string;
+  has_api_key: boolean;
+  api_key_hint: string;
+}
+
 const MAX_LOGS = 12;
 
 function getErrorMessage(error: unknown) {
@@ -24,6 +43,20 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [chunkCount, setChunkCount] = useState(0);
   const [lastChunkInfo, setLastChunkInfo] = useState<string>("No audio received yet.");
+  const [sttStatus, setSttStatus] = useState("idle");
+  const [partialTranscript, setPartialTranscript] = useState("");
+  const [finalTranscript, setFinalTranscript] = useState<string[]>([]);
+  const [sttSettings, setSttSettings] = useState<SttSettingsView>({
+    provider: "aliyun-bailian",
+    api_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+    model: "fun-asr-realtime",
+    workspace_id: "",
+    has_api_key: false,
+    api_key_hint: "",
+  });
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [settingsStatus, setSettingsStatus] = useState("Not saved");
+  const [isTestingSettings, setIsTestingSettings] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
 
   const addLog = (message: string) => {
@@ -34,9 +67,20 @@ function App() {
   };
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let unlistenAudio: (() => void) | undefined;
+    let unlistenStt: (() => void) | undefined;
+    let unlistenStatus: (() => void) | undefined;
 
     addLog("Ready");
+
+    void invoke<SttSettingsView>("get_stt_settings")
+      .then((settings) => {
+        setSttSettings(settings);
+        setSettingsStatus(settings.has_api_key ? "Saved locally" : "API key not configured");
+      })
+      .catch((error) => {
+        addLog(`Load settings failed: ${getErrorMessage(error)}`);
+      });
 
     void listen<AudioChunk>("audio-chunk", (event) => {
       const chunk = event.payload;
@@ -46,14 +90,36 @@ function App() {
       );
     })
       .then((dispose) => {
-        unlisten = dispose;
+        unlistenAudio = dispose;
       })
       .catch((error) => {
         addLog(`Audio listener failed: ${getErrorMessage(error)}`);
       });
 
+    void listen<SttTranscriptEvent>("stt-transcript", (event) => {
+      const { text, is_final } = event.payload;
+      if (is_final) {
+        setFinalTranscript((prev) => [...prev, text]);
+        setPartialTranscript("");
+      } else {
+        setPartialTranscript(text);
+      }
+    }).then((dispose) => {
+      unlistenStt = dispose;
+    });
+
+    void listen<SttStatusEvent>("stt-status", (event) => {
+      const nextStatus = `${event.payload.provider}: ${event.payload.status}`;
+      setSttStatus(nextStatus);
+      addLog(`STT ${nextStatus}`);
+    }).then((dispose) => {
+      unlistenStatus = dispose;
+    });
+
     return () => {
-      unlisten?.();
+      unlistenAudio?.();
+      unlistenStt?.();
+      unlistenStatus?.();
     };
   }, []);
 
@@ -63,6 +129,9 @@ function App() {
       setIsRecording(true);
       setChunkCount(0);
       setLastChunkInfo("Waiting for incoming audio chunks...");
+      setPartialTranscript("");
+      setFinalTranscript([]);
+      setSttStatus("starting");
       addLog(message);
     } catch (error) {
       addLog(`Start failed: ${getErrorMessage(error)}`);
@@ -85,6 +154,51 @@ function App() {
       addLog(message);
     } catch (error) {
       addLog(`Play failed: ${getErrorMessage(error)}`);
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      const saved = await invoke<SttSettingsView>("save_stt_settings", {
+        settings: {
+          api_key: apiKeyInput,
+          api_endpoint: sttSettings.api_endpoint,
+          model: sttSettings.model,
+          workspace_id: sttSettings.workspace_id,
+        },
+      });
+      setSttSettings(saved);
+      setApiKeyInput("");
+      setSettingsStatus("Saved locally");
+      addLog("STT settings saved");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setSettingsStatus(`Save failed: ${message}`);
+      addLog(`Save settings failed: ${message}`);
+    }
+  };
+
+  const testSettings = async () => {
+    setIsTestingSettings(true);
+    setSettingsStatus("Testing connection...");
+
+    try {
+      const message = await invoke<string>("test_stt_settings", {
+        settings: {
+          api_key: apiKeyInput,
+          api_endpoint: sttSettings.api_endpoint,
+          model: sttSettings.model,
+          workspace_id: sttSettings.workspace_id,
+        },
+      });
+      setSettingsStatus(message);
+      addLog(message);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setSettingsStatus(`Test failed: ${message}`);
+      addLog(`Test settings failed: ${message}`);
+    } finally {
+      setIsTestingSettings(false);
     }
   };
 
@@ -129,6 +243,86 @@ function App() {
             <div key={`${line}-${index}`}>{line}</div>
           ))}
         </div>
+      </section>
+
+      <section className="panel">
+        <h2>Transcript</h2>
+        <p className="summary">Aliyun Bailian STT status: {sttStatus}</p>
+        <div className="transcript">
+          {finalTranscript.map((line, index) => (
+            <div key={`${line}-${index}`}>{line}</div>
+          ))}
+          {partialTranscript && <div className="partial">{partialTranscript}</div>}
+          {finalTranscript.length === 0 && !partialTranscript && (
+            <div className="placeholder">No transcript yet.</div>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Settings</h2>
+        <p className="summary">
+          Provider: {sttSettings.provider}. Credentials are stored in the local app
+          support directory and read by Rust at runtime.
+        </p>
+
+        <div className="settings-grid">
+          <label>
+            <span>API Key</span>
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(event) => setApiKeyInput(event.target.value)}
+              placeholder={sttSettings.has_api_key ? "Saved locally. Leave blank to keep it." : "sk-..."}
+            />
+            {sttSettings.has_api_key && (
+              <small className="field-hint">Saved key: {sttSettings.api_key_hint}</small>
+            )}
+          </label>
+
+          <label>
+            <span>API Endpoint</span>
+            <input
+              type="text"
+              value={sttSettings.api_endpoint}
+              onChange={(event) =>
+                setSttSettings((prev) => ({ ...prev, api_endpoint: event.target.value }))
+              }
+            />
+          </label>
+
+          <label>
+            <span>Model</span>
+            <input
+              type="text"
+              value={sttSettings.model}
+              onChange={(event) =>
+                setSttSettings((prev) => ({ ...prev, model: event.target.value }))
+              }
+            />
+          </label>
+
+          <label>
+            <span>Workspace ID</span>
+            <input
+              type="text"
+              value={sttSettings.workspace_id}
+              onChange={(event) =>
+                setSttSettings((prev) => ({ ...prev, workspace_id: event.target.value }))
+              }
+              placeholder="Optional"
+            />
+          </label>
+        </div>
+
+        <div className="actions">
+          <button onClick={saveSettings}>Save STT Settings</button>
+          <button onClick={testSettings} disabled={isTestingSettings}>
+            {isTestingSettings ? "Testing..." : "Test Connection"}
+          </button>
+        </div>
+
+        <p className="summary">{settingsStatus}</p>
       </section>
     </main>
   );

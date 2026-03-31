@@ -1,8 +1,11 @@
+mod stt;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use stt::SttProvider;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize, Clone)]
@@ -42,6 +45,28 @@ static STREAM_MUTEX: Mutex<()> = Mutex::new(());
 static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
 static RECORDING_CHUNKS: Mutex<Vec<Vec<i16>>> = Mutex::new(Vec::new());
 static LATEST_RECORDING: Mutex<Option<RecordedAudio>> = Mutex::new(None);
+static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
+
+#[tauri::command]
+fn get_stt_settings(app: AppHandle) -> Result<stt::SttSettingsView, String> {
+    stt::load_settings_view(&app)
+}
+
+#[tauri::command]
+fn save_stt_settings(
+    app: AppHandle,
+    settings: stt::SttSettingsInput,
+) -> Result<stt::SttSettingsView, String> {
+    stt::save_settings(&app, settings)
+}
+
+#[tauri::command]
+async fn test_stt_settings(
+    app: AppHandle,
+    settings: stt::SttSettingsInput,
+) -> Result<String, String> {
+    stt::test_settings(&app, settings).await
+}
 
 fn create_wav_header(
     sample_rate: u32,
@@ -349,6 +374,11 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
         .map_err(|_| "Recording chunk lock poisoned".to_string())?
         .clear();
 
+    let provider = stt::create_default_stt_provider(app.clone())?;
+    *ACTIVE_STT_PROVIDER
+        .lock()
+        .map_err(|_| "STT provider lock poisoned".to_string())? = provider;
+
     let file_path_clone = file_path.clone();
     let err_fn = |err| eprintln!("Record error: {}", err);
 
@@ -368,6 +398,11 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
                     }
+                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
+                        if let Some(provider) = provider.as_ref() {
+                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
+                        }
+                    }
                     write_pcm_chunk(&file_path_clone, &chunk);
                 },
                 err_fn,
@@ -384,6 +419,11 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
                     emit_chunk(&app, sample_rate, channels, size);
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
+                    }
+                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
+                        if let Some(provider) = provider.as_ref() {
+                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
+                        }
                     }
                     write_pcm_chunk(&file_path_clone, &chunk);
                 },
@@ -405,6 +445,11 @@ fn start_recording(app: AppHandle) -> Result<String, String> {
                     emit_chunk(&app, sample_rate, channels, size);
                     if let Ok(mut chunks) = RECORDING_CHUNKS.lock() {
                         chunks.push(chunk.clone());
+                    }
+                    if let Ok(provider) = ACTIVE_STT_PROVIDER.lock() {
+                        if let Some(provider) = provider.as_ref() {
+                            let _ = provider.push_chunk(chunk.clone(), sample_rate, channels);
+                        }
                     }
                     write_pcm_chunk(&file_path_clone, &chunk);
                 },
@@ -474,6 +519,14 @@ fn stop_recording() -> Result<String, String> {
             channels: recording.channels,
             chunks,
         });
+    }
+
+    if let Some(provider) = ACTIVE_STT_PROVIDER
+        .lock()
+        .map_err(|_| "STT provider lock poisoned".to_string())?
+        .take()
+    {
+        let _ = provider.finish();
     }
 
     Ok("Recording stopped".to_string())
@@ -630,6 +683,9 @@ fn play_recorded() -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            get_stt_settings,
+            save_stt_settings,
+            test_stt_settings,
             start_recording,
             stop_recording,
             play_recorded,

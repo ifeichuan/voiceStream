@@ -22,6 +22,10 @@ button {
   cursor: pointer;
 }
 
+input {
+  font: inherit;
+}
+
 .app {
   max-width: 760px;
   margin: 0 auto;
@@ -125,4 +129,54 @@ h1 {
 
 .log div + div {
   margin-top: 8px;
+}
+
+.transcript {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #e6ecf3;
+  background: #f8fafc;
+  min-height: 120px;
+}
+
+.transcript div + div {
+  margin-top: 8px;
+}
+
+.partial {
+  color: #3b5ccc;
+}
+
+.placeholder {
+  color: #5d6b7f;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-grid span {
+  color: #5d6b7f;
+  font-size: 0.85rem;
+}
+
+.field-hint {
+  color: #5d6b7f;
+  font-size: 0.8rem;
+}
+
+.settings-grid input {
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #152033;
 }
