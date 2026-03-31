@@ -27,6 +27,11 @@ Notes:
 
 - automatic paste uses `osascript`, so macOS Accessibility permission may be required the first time
 
+Related design docs:
+
+- `docs/features/agent-mode-and-toggle-hotkey.md`
+- `docs/features/macos-menubar-voice-input.md`
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
