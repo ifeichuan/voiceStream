@@ -1,5 +1,6 @@
 mod audio;
 mod native_hud;
+mod pi_rpc;
 mod stt;
 
 use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
@@ -683,6 +684,12 @@ fn schedule_hide_hud(app: &AppHandle, delay_ms: u64) {
     });
 }
 
+async fn optimize_transcript_with_pi(text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || pi_rpc::refine_text(&text))
+        .await
+        .map_err(|error| format!("pi rpc task join failed: {}", error))?
+}
+
 fn handle_hotkey_released(app: &AppHandle) {
     if !HOTKEY_RECORDING.swap(false, Ordering::SeqCst) {
         return;
@@ -703,18 +710,35 @@ fn handle_hotkey_released(app: &AppHandle) {
         match stt::wait_for_final_text(tokio::time::Duration::from_millis(HOTKEY_PASTE_WAIT_MS))
             .await
         {
-            Ok(text) if !text.trim().is_empty() => match paste_text_to_cursor(&text) {
-                Ok(()) => {
-                    native_hud::show_success(&app, &text);
-                    schedule_hide_hud(&app, 850);
-                    emit_hotkey_state(&app, "pasted", "Pasted to focused app");
+            Ok(text) if !text.trim().is_empty() => {
+                native_hud::show_processing_text(&app, "Optimizing...");
+                emit_hotkey_state(&app, "processing", "Optimizing...");
+
+                let (final_text, pasted_message) =
+                    match optimize_transcript_with_pi(text.clone()).await {
+                        Ok(refined) if !refined.trim().is_empty() => {
+                            (refined, "Pasted optimized text".to_string())
+                        }
+                        Ok(_) => (text, "Pasted raw transcript".to_string()),
+                        Err(error) => {
+                            eprintln!("pi optimization failed: {}", error);
+                            (text, format!("Pi optimize failed, pasted raw transcript"))
+                        }
+                    };
+
+                match paste_text_to_cursor(&final_text) {
+                    Ok(()) => {
+                        native_hud::show_success(&app, &final_text);
+                        schedule_hide_hud(&app, 850);
+                        emit_hotkey_state(&app, "pasted", &pasted_message);
+                    }
+                    Err(error) => {
+                        native_hud::show_error(&app, &error);
+                        schedule_hide_hud(&app, 1100);
+                        emit_hotkey_state(&app, "error", &error);
+                    }
                 }
-                Err(error) => {
-                    native_hud::show_error(&app, &error);
-                    schedule_hide_hud(&app, 1100);
-                    emit_hotkey_state(&app, "error", &error);
-                }
-            },
+            }
             Ok(_) => {
                 native_hud::show_error(&app, "No transcript");
                 schedule_hide_hud(&app, 900);

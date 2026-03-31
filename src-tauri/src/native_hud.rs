@@ -484,9 +484,14 @@ mod macos {
     }
 
     pub fn show_processing(app: &AppHandle) {
-        with_hud(app, |hud| {
+        show_processing_text(app, "Transcribing...");
+    }
+
+    pub fn show_processing_text(app: &AppHandle, text: &str) {
+        let text = text.to_string();
+        with_hud(app, move |hud| {
             hud.set_level(0.14);
-            hud.set_text("Transcribing...", HudMode::Processing);
+            hud.set_text(&text, HudMode::Processing);
             hud.show();
         });
     }
@@ -543,6 +548,8 @@ pub fn initialize(_app: &tauri::AppHandle) {}
 pub fn show_recording(_app: &tauri::AppHandle) {}
 #[cfg(not(target_os = "macos"))]
 pub fn show_processing(_app: &tauri::AppHandle) {}
+#[cfg(not(target_os = "macos"))]
+pub fn show_processing_text(_app: &tauri::AppHandle, _text: &str) {}
 #[cfg(not(target_os = "macos"))]
 pub fn show_success(_app: &tauri::AppHandle, _text: &str) {}
 #[cfg(not(target_os = "macos"))]
