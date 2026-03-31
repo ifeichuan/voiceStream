@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
+use std::{env, thread};
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
@@ -778,6 +779,39 @@ async fn optimize_transcript_with_pi(text: String) -> Result<String, String> {
         .map_err(|error| format!("pi rpc task join failed: {}", error))?
 }
 
+fn maybe_run_pi_startup_self_test() {
+    let enabled = env::var("VOICESTREAM_PI_STARTUP_TEST")
+        .ok()
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    thread::spawn(|| {
+        eprintln!("[voicestream][startup-test] starting pi self-test");
+        let started_at = Instant::now();
+        let sample = "好的好的，我们现在测试一下 voice feedback 到底会不会被先调用。";
+        match pi_rpc::refine_text(sample) {
+            Ok(result) => {
+                eprintln!(
+                    "[voicestream][startup-test] success in {} ms result={}",
+                    started_at.elapsed().as_millis(),
+                    serde_json::to_string(&result)
+                        .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "[voicestream][startup-test] failed in {} ms error={}",
+                    started_at.elapsed().as_millis(),
+                    error
+                );
+            }
+        }
+    });
+}
+
 fn finish_hotkey_recording(app: &AppHandle) {
     if !HOTKEY_RECORDING.swap(false, Ordering::SeqCst) {
         return;
@@ -1006,6 +1040,8 @@ pub fn run() {
                 )?;
             }
 
+            pi_rpc::warmup();
+            maybe_run_pi_startup_self_test();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

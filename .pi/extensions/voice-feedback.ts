@@ -35,15 +35,15 @@ export default function voiceFeedbackExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "voice_feedback",
     label: "Voice Feedback",
-    description: "Speak a short status message out loud for immediate user feedback.",
-    promptSnippet: "Speak a short status update aloud when immediate audible feedback would help.",
+    description: "Speak a short, content-aware line before responding.",
+    promptSnippet: "Before responding, call this once with a short line that fits the current text.",
     promptGuidelines: [
-      "Use this tool sparingly for short audible feedback.",
-      "Prefer calling this tool once near the start of a task when the user benefits from immediate confirmation.",
-      "When available, use it before the main text response if the task involves noticeable processing.",
-      "Keep spoken text short, natural, and under 12 Chinese characters or a short English phrase when possible.",
-      "This tool starts speech asynchronously and returns immediately.",
-      "Each call stops any in-progress say playback before starting the new message.",
+      "Call this once near the start when audible feedback is useful.",
+      "Use a short, natural line that fits the current text.",
+      "Keep it brief, usually 4 to 12 Chinese characters.",
+      "Do not repeat the full input or give a long summary.",
+      "Call it before the main text output.",
+      "Speech starts asynchronously and interrupts any previous say playback.",
     ],
     parameters: Type.Object({
       text: Type.String({ description: "Short text to speak aloud" }),
