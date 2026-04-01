@@ -1,6 +1,7 @@
 mod audio;
 mod native_hud;
 mod pi_rpc;
+mod settings;
 mod stt;
 
 use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
@@ -106,6 +107,19 @@ async fn test_stt_settings(
     settings: stt::SttSettingsInput,
 ) -> Result<String, String> {
     stt::test_settings(&app, settings).await
+}
+
+#[tauri::command]
+fn get_app_settings(app: AppHandle) -> Result<settings::AppSettingsView, String> {
+    settings::load_app_settings_view(&app)
+}
+
+#[tauri::command]
+fn save_app_settings(
+    app: AppHandle,
+    settings: settings::AppSettingsInput,
+) -> Result<settings::AppSettingsView, String> {
+    settings::save_app_settings(&app, settings)
 }
 
 fn create_wav_header(
@@ -1010,6 +1024,10 @@ fn handle_hotkey_released(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                settings::set_app_data_dir(app_data_dir);
+            }
+
             if let Ok(resource_dir) = app.path().resource_dir() {
                 let candidate = resource_dir.join("pi-extensions");
                 if candidate.exists() {
@@ -1055,6 +1073,8 @@ pub fn run() {
             get_stt_settings,
             save_stt_settings,
             test_stt_settings,
+            get_app_settings,
+            save_app_settings,
             start_recording,
             stop_recording,
             play_recorded,

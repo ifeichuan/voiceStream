@@ -1,12 +1,11 @@
 use crate::audio::convert_chunk_to_pcm16;
 use crate::native_hud;
+use crate::settings;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::{
@@ -15,11 +14,8 @@ use tokio_tungstenite::{
 };
 
 const DEFAULT_PROVIDER: &str = "aliyun-bailian";
-const DEFAULT_MODEL: &str = "fun-asr-realtime";
-const DEFAULT_API_ENDPOINT: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
-const STORE_FILE_NAME: &str = "credentials.json";
 static TRANSCRIPT_STATE: Mutex<TranscriptState> = Mutex::new(TranscriptState::new());
 
 struct TranscriptState {
@@ -54,37 +50,9 @@ pub struct SttStatusEvent {
     pub status: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SttSettingsInput {
-    pub api_key: String,
-    pub api_endpoint: String,
-    pub model: String,
-    pub workspace_id: String,
-}
+pub use settings::{SttSettingsInput, SttSettingsView};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SttSettingsView {
-    pub provider: String,
-    pub api_endpoint: String,
-    pub model: String,
-    pub workspace_id: String,
-    pub has_api_key: bool,
-    pub api_key_hint: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct StoredSttSettings {
-    api_key: String,
-    api_endpoint: String,
-    model: String,
-    workspace_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct StoredCredentialFile {
-    #[serde(default)]
-    vs_stt_bailian: Option<StoredSttSettings>,
-}
+type StoredSttSettings = settings::SttSettingsInput;
 
 pub trait SttProvider: Send {
     fn push_chunk(&self, pcm: Vec<i16>, sample_rate: u32, channels: u16) -> Result<(), String>;
@@ -174,43 +142,15 @@ impl SttProvider for AliyunBailianSttProvider {
 }
 
 pub fn load_settings_view(app: &AppHandle) -> Result<SttSettingsView, String> {
-    let stored = read_stored_settings(app)?;
-
-    Ok(SttSettingsView {
-        provider: DEFAULT_PROVIDER.to_string(),
-        api_endpoint: stored
-            .as_ref()
-            .map(|value| value.api_endpoint.clone())
-            .unwrap_or_else(|| DEFAULT_API_ENDPOINT.to_string()),
-        model: stored
-            .as_ref()
-            .map(|value| value.model.clone())
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        workspace_id: stored
-            .as_ref()
-            .map(|value| value.workspace_id.clone())
-            .unwrap_or_default(),
-        has_api_key: stored
-            .as_ref()
-            .map(|value| !value.api_key.is_empty())
-            .unwrap_or(false),
-        api_key_hint: stored
-            .as_ref()
-            .map(|value| mask_api_key(&value.api_key))
-            .unwrap_or_default(),
-    })
+    settings::load_stt_settings_view(app)
 }
 
 pub fn save_settings(app: &AppHandle, input: SttSettingsInput) -> Result<SttSettingsView, String> {
-    let existing = read_stored_settings(app)?;
-    let next = merge_settings(existing, input);
-    write_stored_settings(app, &next)?;
-    load_settings_view(app)
+    settings::save_stt_settings(app, input)
 }
 
 pub async fn test_settings(app: &AppHandle, input: SttSettingsInput) -> Result<String, String> {
-    let existing = read_stored_settings(app)?;
-    let settings = merge_settings(existing, input);
+    let settings = settings::stt_test_merged(app, input)?;
 
     if settings.api_key.is_empty() {
         return Err("API key is required".to_string());
@@ -221,17 +161,15 @@ pub async fn test_settings(app: &AppHandle, input: SttSettingsInput) -> Result<S
 }
 
 pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttProvider>>, String> {
-    let settings = match read_stored_settings(&app)? {
-        Some(value) if !value.api_key.is_empty() => value,
-        _ => {
-            mark_runtime_finished();
-            emit_status(
-                &app,
-                "disabled: save Bailian API key in Settings to enable realtime STT",
-            );
-            return Ok(None);
-        }
-    };
+    let settings = settings::runtime_stt_settings(&app)?;
+    if settings.api_key.is_empty() {
+        mark_runtime_finished();
+        emit_status(
+            &app,
+            "disabled: save Bailian API key in Settings to enable realtime STT",
+        );
+        return Ok(None);
+    }
 
     Ok(Some(Box::new(AliyunBailianSttProvider::new(app, settings))))
 }
@@ -611,64 +549,6 @@ fn emit_status(app: &AppHandle, status: &str) {
     );
 }
 
-fn credentials_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("app data dir unavailable: {}", e))?;
-    fs::create_dir_all(&dir).map_err(|e| format!("failed to create app data dir: {}", e))?;
-    Ok(dir.join(STORE_FILE_NAME))
-}
-
-fn read_stored_settings(app: &AppHandle) -> Result<Option<StoredSttSettings>, String> {
-    let path = credentials_path(app)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read credentials store: {}", e))?;
-    let file: StoredCredentialFile =
-        serde_json::from_str(&content).map_err(|e| format!("invalid credentials store: {}", e))?;
-    Ok(file.vs_stt_bailian)
-}
-
-fn write_stored_settings(app: &AppHandle, settings: &StoredSttSettings) -> Result<(), String> {
-    let path = credentials_path(app)?;
-    let file = StoredCredentialFile {
-        vs_stt_bailian: Some(settings.clone()),
-    };
-    let content = serde_json::to_string_pretty(&file)
-        .map_err(|e| format!("failed to encode credentials store: {}", e))?;
-    fs::write(&path, content).map_err(|e| format!("failed to write credentials store: {}", e))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("failed to secure credentials store: {}", e))?;
-    }
-
-    Ok(())
-}
-
-fn merge_settings(
-    existing: Option<StoredSttSettings>,
-    input: SttSettingsInput,
-) -> StoredSttSettings {
-    let existing = existing.unwrap_or_else(default_settings);
-    let api_key = sanitize(&input.api_key).unwrap_or(existing.api_key);
-
-    StoredSttSettings {
-        api_key,
-        api_endpoint: sanitize(&input.api_endpoint)
-            .unwrap_or(existing.api_endpoint)
-            .trim_end_matches('/')
-            .to_string(),
-        model: sanitize(&input.model).unwrap_or(existing.model),
-        workspace_id: sanitize(&input.workspace_id).unwrap_or_default(),
-    }
-}
 
 fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, String> {
     let mut request = settings
@@ -703,32 +583,3 @@ fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, S
     Ok(request)
 }
 
-fn default_settings() -> StoredSttSettings {
-    StoredSttSettings {
-        api_key: String::new(),
-        api_endpoint: DEFAULT_API_ENDPOINT.to_string(),
-        model: DEFAULT_MODEL.to_string(),
-        workspace_id: String::new(),
-    }
-}
-
-fn sanitize(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn mask_api_key(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    let chars: Vec<char> = trimmed.chars().collect();
-    let visible = chars.len().min(4);
-    let suffix: String = chars[chars.len() - visible..].iter().collect();
-    format!("••••{}", suffix)
-}
