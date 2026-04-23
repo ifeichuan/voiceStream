@@ -93,6 +93,10 @@ const PROMPT_TEMPLATES = [
   { value: "default", label: "默认 · 最小整理" },
   { value: "light", label: "轻量 · 轻修正" },
   { value: "structured", label: "结构化 · 轻结构化" },
+  { value: "official-lite", label: "官方感 · 简洁清晰" },
+  { value: "list-friendly", label: "列表友好 · 1. 2. 3." },
+  { value: "json-structured", label: "JSON 结构化 · 稳定解析" },
+  { value: "tooluse-structured", label: "Tool Use 结构化 · 最稳" },
   { value: "custom", label: "自定义 · 手动模板" },
 ];
 const NAV_ITEMS: Array<{ key: NavKey; label: string; meta: string }> = [
@@ -180,6 +184,18 @@ function App() {
 
   const selectedProvider = useMemo(
     () => localPi.providers.find((provider) => provider.id === piSettings.provider),
+    [localPi.providers, piSettings.provider],
+  );
+  const nativeProviders = useMemo(
+    () => localPi.providers.filter((provider) => !provider.base_url && !provider.api),
+    [localPi.providers],
+  );
+  const fileProviders = useMemo(
+    () => localPi.providers.filter((provider) => provider.base_url || provider.api),
+    [localPi.providers],
+  );
+  const isManualProvider = useMemo(
+    () => !piSettings.provider || !localPi.providers.some((provider) => provider.id === piSettings.provider),
     [localPi.providers, piSettings.provider],
   );
 
@@ -357,23 +373,34 @@ function App() {
     setPiSettings((prev) => ({
       ...prev,
       provider: providerId,
-      model: provider?.models[0]?.id ?? prev.model,
+      model: provider?.models[0]?.id ?? "",
       provider_json:
         provider === undefined
-          ? prev.provider_json
-          : JSON.stringify(
-              {
-                providers: {
-                  [provider.id]: {
-                    baseUrl: provider.base_url,
-                    api: provider.api,
-                    models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+          ? ""
+          : provider.base_url && provider.api
+            ? JSON.stringify(
+                {
+                  providers: {
+                    [provider.id]: {
+                      baseUrl: provider.base_url,
+                      api: provider.api,
+                      models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+                    },
                   },
                 },
-              },
-              null,
-              2,
-            ),
+                null,
+                2,
+              )
+            : "",
+    }));
+  };
+
+  const useNativePiConfig = () => {
+    setPiSettings((prev) => ({
+      ...prev,
+      provider: "",
+      model: "",
+      provider_json: "",
     }));
   };
 
@@ -598,9 +625,14 @@ function App() {
                   <h3 className={sectionTitleClass}>Pi</h3>
                   <p className={`mt-1.5 ${mutedClass}`}>模型与运行方式。</p>
                 </div>
-                <button className={ghostButtonClass} type="button" onClick={applyLocalPiDefaults}>
-                  使用本机默认值
-                </button>
+                <div className="flex gap-2.5">
+                  <button className={ghostButtonClass} type="button" onClick={applyLocalPiDefaults}>
+                    使用本机默认值
+                  </button>
+                  <button className={ghostButtonClass} type="button" onClick={useNativePiConfig}>
+                    跟随本机 Pi（清空覆盖）
+                  </button>
+                </div>
               </div>
 
               <div className={formGridClass}>
@@ -633,16 +665,38 @@ function App() {
                   <span className={fieldLabelClass}>Provider</span>
                   <select
                     className={inputClass}
-                    value={piSettings.provider}
+                    value={isManualProvider ? "" : piSettings.provider}
                     onChange={(event) => applyProviderFromLocal(event.target.value)}
                   >
                     <option value="">手动输入</option>
-                    {localPi.providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.id}
-                      </option>
-                    ))}
+                    {fileProviders.length > 0 && (
+                      <optgroup label="本机 models.json">
+                        {fileProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.id}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {nativeProviders.length > 0 && (
+                      <optgroup label="Pi 原生可用（CLI）">
+                        {nativeProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.id}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
+                  {isManualProvider && (
+                    <input
+                      className={inputClass}
+                      type="text"
+                      value={piSettings.provider}
+                      onChange={(event) => setPiSettings((prev) => ({ ...prev, provider: event.target.value }))}
+                      placeholder="例如：github-copilot"
+                    />
+                  )}
                 </label>
 
                 <label className={fieldClass}>
@@ -708,7 +762,7 @@ function App() {
               </div>
 
               <div className="grid gap-0">
-                {localPi.providers.map((provider) => (
+                {fileProviders.map((provider) => (
                   <button
                     key={provider.id}
                     type="button"
@@ -725,6 +779,29 @@ function App() {
                     <span>{provider.models.length} 个模型</span>
                   </button>
                 ))}
+
+                {nativeProviders.length > 0 && (
+                  <div className="mt-4 border-t border-paper-line pt-3">
+                    <p className={fieldLabelClass}>Pi 原生可用 Provider（CLI）</p>
+                    {nativeProviders.map((provider) => (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        className={[
+                          "flex w-full items-baseline justify-between gap-5 border-b border-paper-line bg-transparent py-4 text-left transition duration-150 hover:-translate-y-px max-[760px]:flex-col max-[760px]:items-start",
+                          piSettings.provider === provider.id ? "text-paper-accent" : "",
+                        ].join(" ")}
+                        onClick={() => applyProviderFromLocal(provider.id)}
+                      >
+                        <div>
+                          <strong className="block text-base font-semibold">{provider.id}</strong>
+                          <p className="mt-1 break-all text-paper-muted">来自 pi --list-models</p>
+                        </div>
+                        <span>{provider.models.length} 个模型</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
 

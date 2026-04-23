@@ -32,18 +32,24 @@ struct PiRpcLaunchConfig {
 }
 
 impl PiRpcLaunchConfig {
-    fn for_mode(mode: PiRpcLaunchMode, app_root: &Path) -> Result<Self, String> {
+    fn for_mode(mode: PiRpcLaunchMode, app_root: &Path, enable_tooluse_output: bool) -> Result<Self, String> {
         match mode {
             PiRpcLaunchMode::DictationFast => Ok(Self {
                 mode,
                 use_session: false,
                 session_path: None,
-                disable_tools: true,
-                disable_extensions: true,
+                // Some providers reject requests when tools field is an empty array.
+                // Keep tools enabled.
+                disable_tools: false,
+                disable_extensions: !enable_tooluse_output,
                 disable_skills: true,
                 disable_prompt_templates: true,
                 disable_themes: true,
-                extension_paths: vec![],
+                extension_paths: if enable_tooluse_output {
+                    vec![resolve_dictation_emit_extension(app_root)?]
+                } else {
+                    vec![]
+                },
             }),
             PiRpcLaunchMode::DictationWithVoiceFeedback => Ok(Self {
                 mode,
@@ -260,8 +266,10 @@ fn spawn_pi_rpc(
 ), String> {
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
+    let runtime = settings::runtime_pi_settings();
     let launch_mode = current_launch_mode();
-    let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root)?;
+    let enable_tooluse_output = runtime.prompt_template_key.trim().eq_ignore_ascii_case("tooluse-structured");
+    let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root, enable_tooluse_output)?;
     let mut command = Command::new(&pi_path);
 
     command.current_dir(&app_root).arg("--mode").arg("rpc");
@@ -325,7 +333,6 @@ fn spawn_pi_rpc(
         pi_path.display()
     );
 
-    let runtime = settings::runtime_pi_settings();
     let selected_provider = (!runtime.provider.trim().is_empty()).then_some(runtime.provider.clone());
     if let Some(provider) = selected_provider.as_deref() {
         command.arg("--provider").arg(provider);
@@ -488,6 +495,35 @@ fn resolve_voice_feedback_extension(app_root: &Path) -> Result<PathBuf, String> 
     }
 }
 
+fn resolve_dictation_emit_extension(app_root: &Path) -> Result<PathBuf, String> {
+    if let Some(path) = env::var("VOICESTREAM_PI_DICTATION_TOOLUSE_EXTENSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let normalized = path.canonicalize().unwrap_or(path.clone());
+        if normalized.exists() {
+            return Ok(normalized);
+        }
+
+        return Err(format!(
+            "dictation tooluse extension from VOICESTREAM_PI_DICTATION_TOOLUSE_EXTENSION not found at {}",
+            path.display()
+        ));
+    }
+
+    let extension = app_root.join("pi-extensions/dictation-emit.ts");
+    if extension.exists() {
+        Ok(extension)
+    } else {
+        Err(format!(
+            "dictation emit extension not found at {}",
+            extension.display()
+        ))
+    }
+}
+
 fn resolve_pi_path() -> PathBuf {
     if let Ok(path) = env::var("VOICESTREAM_PI_PATH") {
         let path = PathBuf::from(path);
@@ -603,6 +639,7 @@ fn wait_for_prompt_completion(
     let mut saw_first_text_delta = false;
     let mut saw_toolcall_start = false;
     let mut saw_tool_execution_start = false;
+    let mut tooluse_optimized: Option<String> = None;
 
     loop {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -661,6 +698,11 @@ fn wait_for_prompt_completion(
                                     streamed_text.push_str(delta);
                                 }
                             }
+                            Some("toolcall_end") => {
+                                if let Some(value) = extract_optimized_from_toolcall_event(&line.value) {
+                                    tooluse_optimized = Some(value);
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -701,6 +743,12 @@ fn wait_for_prompt_completion(
                     Some("agent_end") => {
                         if let Some(trace) = trace.as_deref_mut() {
                             trace.mark("agent_end", "stream complete");
+                        }
+
+                        if streamed_text.trim().is_empty() {
+                            if let Some(text) = tooluse_optimized.clone() {
+                                streamed_text = text;
+                            }
                         }
 
                         if streamed_text.trim().is_empty() {
@@ -979,11 +1027,73 @@ fn extract_assistant_error(message: &Value) -> Option<String> {
     None
 }
 
+fn extract_optimized_from_toolcall_event(event: &Value) -> Option<String> {
+    let assistant_event = event.get("assistantMessageEvent")?;
+
+    let candidates = [
+        assistant_event.pointer("/partial/content/0/arguments"),
+        assistant_event.pointer("/partial/content/0/args"),
+        assistant_event.pointer("/partial/content/0/input"),
+        assistant_event.pointer("/partial/content/0/parameters"),
+        assistant_event.pointer("/partial/content/0/params"),
+        assistant_event.pointer("/delta"),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if let Some(result) = extract_optimized_from_value(candidate) {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
+fn extract_optimized_from_value(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return extract_optimized_from_value(&parsed);
+        }
+
+        return None;
+    }
+
+    if let Some(obj) = value.as_object() {
+        if let Some(optimized) = obj.get("optimized").and_then(Value::as_str) {
+            let optimized = optimized.trim();
+            if !optimized.is_empty() {
+                return Some(optimized.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 fn sanitize_result(result: &str, original_text: &str) -> String {
     let normalized = normalize_result_text(result);
     if normalized.is_empty() {
         eprintln!("[pi-rpc][sanitize] normalized is empty");
         return String::new();
+    }
+
+    if let Some(json_optimized) = extract_json_optimized(&normalized) {
+        eprintln!(
+            "[pi-rpc][sanitize] extracted_json_result={}",
+            serde_json::to_string(&json_optimized)
+                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+        );
+        let validated = validate_candidate(&json_optimized, original_text).unwrap_or_default();
+        eprintln!(
+            "[pi-rpc][sanitize] validated_json_result={}",
+            serde_json::to_string(&validated)
+                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+        );
+        return validated;
     }
 
     let prompt_echo = looks_like_prompt_echo(&normalized, original_text);
@@ -1050,6 +1160,39 @@ fn extract_tagged_result(text: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn extract_json_optimized(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+
+    // Accept plain JSON object response.
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return value
+            .get("optimized")
+            .and_then(Value::as_str)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+    }
+
+    // Accept fenced JSON blocks.
+    if trimmed.starts_with("```") && trimmed.ends_with("```") {
+        let unwrapped = trimmed
+            .trim_start_matches("```json")
+            .trim_start_matches("```JSON")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        if let Ok(value) = serde_json::from_str::<Value>(unwrapped) {
+            return value
+                .get("optimized")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+        }
+    }
+
+    None
 }
 
 fn normalize_result_text(result: &str) -> String {

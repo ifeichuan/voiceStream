@@ -119,7 +119,14 @@ fn save_app_settings(
     app: AppHandle,
     settings: settings::AppSettingsInput,
 ) -> Result<settings::AppSettingsView, String> {
-    settings::save_app_settings(&app, settings)
+    let saved = settings::save_app_settings(&app, settings)?;
+
+    // Pi dictation fast mode may reuse a long-lived rpc process.
+    // Restart it after settings changes so provider/model updates apply immediately.
+    pi_rpc::shutdown_reusable_process();
+    pi_rpc::warmup();
+
+    Ok(saved)
 }
 
 fn create_wav_header(
