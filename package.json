@@ -11,16 +11,17 @@
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "^5.2.8",
+    "@tanstack/react-router": "^1.170.7",
     "@tauri-apps/api": "^2",
     "@wterm/dom": "^0.3.0",
     "@wterm/react": "^0.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.15.1",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/router-plugin": "^1.168.10",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

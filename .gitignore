@@ -26,3 +26,4 @@ dist-ssr
 .pi/sessions
 .pi/*.jsonl
 src-tauri/target
+src/routeTree.gen.ts
