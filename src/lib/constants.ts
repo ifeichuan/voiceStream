@@ -23,12 +23,12 @@ export const PROMPT_TEMPLATES = [
 ] as const;
 
 export const NAV_ITEMS = [
-  { key: "overview", label: "概览", meta: "总览", path: "/" },
-  { key: "shortcuts", label: "快捷键", meta: "全局", path: "/shortcuts" },
-  { key: "speech", label: "语音识别", meta: "识别", path: "/speech" },
-  { key: "pi", label: "Pi", meta: "模型与映射", path: "/pi" },
-  { key: "agent", label: "Agent", meta: "任务", path: "/agent" },
-  { key: "activity", label: "活动", meta: "日志", path: "/activity" },
+  { key: "overview", label: "概览", meta: "总览", path: "/", icon: "◉" },
+  { key: "shortcuts", label: "快捷键", meta: "全局", path: "/shortcuts", icon: "⌘" },
+  { key: "speech", label: "语音识别", meta: "识别", path: "/speech", icon: "◗" },
+  { key: "pi", label: "Pi", meta: "模型与映射", path: "/pi", icon: "π" },
+  { key: "agent", label: "Agent", meta: "任务", path: "/agent", icon: "▷" },
+  { key: "activity", label: "活动", meta: "日志", path: "/activity", icon: "≡" },
 ] as const;
 
 export type NavKey = (typeof NAV_ITEMS)[number]["key"];

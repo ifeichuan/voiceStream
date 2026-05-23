@@ -70,15 +70,19 @@
   }
 
   .btn-primary {
-    @apply min-h-10 rounded-full bg-paper-ink px-3.5 text-paper-surface transition duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-55;
+    @apply min-h-10 rounded bg-paper-ink px-3.5 text-paper-surface transition-[transform,opacity] duration-150 hover:-translate-y-px active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-55;
   }
 
   .btn-ghost {
-    @apply min-h-10 rounded-full border border-paper-line bg-transparent px-3.5 text-paper-accent transition duration-150 hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-55;
+    @apply min-h-10 rounded border border-paper-line bg-transparent px-3.5 text-paper-ink transition-[transform,opacity] duration-150 hover:-translate-y-px active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .card {
+    @apply rounded-lg outline outline-1 outline-black/[0.06] dark:outline-white/[0.06];
   }
 
   .section-divider {
-    @apply border-b border-paper-line pb-7;
+    @apply pb-16;
   }
 
   .section-head {
@@ -86,7 +90,7 @@
   }
 
   .section-title {
-    @apply text-base font-semibold tracking-[-0.03em];
+    @apply text-base font-semibold tracking-[-0.03em] [text-wrap:balance];
   }
 
   .form-grid {
@@ -102,27 +106,96 @@
   }
 
   .input {
-    @apply min-h-11 w-full rounded-none border-0 border-b border-paper-line bg-transparent px-0 pt-2.5 pb-3 text-paper-ink outline-none transition duration-150 focus:border-paper-accent;
+    @apply min-h-11 w-full rounded border-0 border-b border-paper-line bg-transparent px-0 pt-2.5 pb-3 text-paper-ink outline-none transition duration-150 focus:border-paper-accent;
   }
 
   .textarea {
-    @apply min-h-[132px] w-full resize-y rounded-none border-0 border-b border-paper-line bg-transparent px-0 pt-2.5 pb-3 font-mono text-[0.88rem] leading-[1.65] text-paper-ink outline-none transition duration-150 focus:border-paper-accent;
+    @apply min-h-[132px] w-full resize-y rounded border-0 border-b border-paper-line bg-transparent px-0 pt-2.5 pb-3 font-mono text-[0.88rem] leading-[1.65] text-paper-ink outline-none transition duration-150 focus:border-paper-accent;
   }
 
   .stat-card {
-    @apply border-b border-paper-line pb-[18px];
+    @apply pb-[18px];
   }
 
   .meta-card {
-    @apply border-b border-paper-line pb-[18px];
+    @apply pb-[18px];
   }
 
   .row {
-    @apply flex items-baseline justify-between gap-4 border-b border-paper-line py-3.5 max-[760px]:flex-col max-[760px]:items-start;
+    @apply flex items-baseline justify-between gap-4 py-3.5 max-[760px]:flex-col max-[760px]:items-start;
   }
 
   .shortcut-display {
-    @apply min-h-11 border-b border-paper-line pt-2.5 pb-3 text-[1.12rem] font-semibold tracking-[-0.02em];
+    @apply min-h-11 pt-2.5 pb-3 text-[1.12rem] font-semibold tracking-[-0.02em];
+  }
+
+  .sr-only {
+    @apply absolute h-px w-px overflow-hidden whitespace-nowrap border-0 p-0;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  /* Left-right form row for settings pages */
+  .form-row {
+    @apply flex min-h-10 items-center justify-between gap-4 py-3;
+  }
+
+  .form-row-label {
+    @apply shrink-0 text-[0.88rem] text-paper-ink;
+  }
+
+  .form-row-control {
+    @apply min-w-0 max-w-[clamp(12rem,50%,20rem)] flex-1 text-right;
+  }
+}
+
+/* Overview breathing animations */
+@keyframes ring-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.04); opacity: 0.8; }
+}
+
+@keyframes ring-breathe-inner {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.06); opacity: 0.6; }
+}
+
+@keyframes ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.7; }
+}
+
+@keyframes ring-pulse-inner {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+.overview-ring-idle {
+  transform-origin: center;
+  animation: ring-breathe 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+
+.overview-ring-idle-inner {
+  transform-origin: center;
+  animation: ring-breathe-inner 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+  animation-delay: 0.5s;
+}
+
+.overview-ring-active {
+  transform-origin: center;
+  animation: ring-pulse 1.5s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+
+.overview-ring-active-inner {
+  transform-origin: center;
+  animation: ring-pulse-inner 1.2s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overview-ring-idle,
+  .overview-ring-idle-inner,
+  .overview-ring-active,
+  .overview-ring-active-inner {
+    animation: none;
   }
 }
 
