@@ -4,15 +4,19 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
 static TERMINALS: OnceLock<Mutex<HashMap<String, AgentTerminalHandle>>> = OnceLock::new();
+static NEXT_TERMINAL_RUN_ID: AtomicU64 = AtomicU64::new(1);
 
 struct AgentTerminalHandle {
+    run_id: u64,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    intentional_stop: Arc<AtomicBool>,
     master: Box<dyn MasterPty + Send>,
 }
 
@@ -43,6 +47,7 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
     }
 
     stop(task_id);
+    let run_id = NEXT_TERMINAL_RUN_ID.fetch_add(1, Ordering::Relaxed);
 
     let (pi_path, app_root, args) = pi_rpc::agent_terminal_command_parts(&session_path)?;
     let pty_system = native_pty_system();
@@ -78,11 +83,14 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
         .map_err(|error| format!("failed to open pty writer: {}", error))?;
     let writer = Arc::new(Mutex::new(writer));
     let killer = Arc::new(Mutex::new(child.clone_killer()));
+    let intentional_stop = Arc::new(AtomicBool::new(false));
 
     let task_id_for_read = task_id.to_string();
     let task_id_for_wait = task_id.to_string();
     let app_for_read = app.clone();
     let app_for_wait = app.clone();
+    let intentional_stop_for_read = intentional_stop.clone();
+    let intentional_stop_for_wait = intentional_stop.clone();
 
     emit_status(&app, task_id, "running", "PTY 已连接。");
 
@@ -92,6 +100,11 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(size) => {
+                    if intentional_stop_for_read.load(Ordering::SeqCst)
+                        || !is_current(&task_id_for_read, run_id)
+                    {
+                        break;
+                    }
                     let _ = app_for_read.emit(
                         "agent-terminal-output",
                         AgentTerminalOutputEvent {
@@ -101,6 +114,11 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
                     );
                 }
                 Err(error) => {
+                    if intentional_stop_for_read.load(Ordering::SeqCst)
+                        || !is_current(&task_id_for_read, run_id)
+                    {
+                        break;
+                    }
                     let _ = app_for_read.emit(
                         "agent-terminal-status",
                         AgentTerminalStatusEvent {
@@ -117,7 +135,11 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
 
     thread::spawn(move || {
         let status = child.wait();
-        remove(&task_id_for_wait);
+        let was_intentional_stop = intentional_stop_for_wait.load(Ordering::SeqCst);
+        remove_if_current(&task_id_for_wait, run_id);
+        if was_intentional_stop {
+            return;
+        }
         let (status_text, message) = match status {
             Ok(status) if status.success() => {
                 ("closed".to_string(), format!("PTY 已退出：{}", status))
@@ -129,8 +151,10 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
     });
 
     let handle = AgentTerminalHandle {
+        run_id,
         writer,
         killer,
+        intentional_stop,
         master: pair.master,
     };
 
@@ -185,6 +209,7 @@ pub fn resize(task_id: &str, cols: u16, rows: u16) -> Result<(), String> {
 
 pub fn stop(task_id: &str) {
     if let Some(handle) = remove(task_id) {
+        handle.intentional_stop.store(true, Ordering::SeqCst);
         if let Ok(mut killer) = handle.killer.lock() {
             let _ = killer.kill();
         }
@@ -207,6 +232,27 @@ fn terminals() -> &'static Mutex<HashMap<String, AgentTerminalHandle>> {
 
 fn remove(task_id: &str) -> Option<AgentTerminalHandle> {
     terminals().lock().ok()?.remove(task_id)
+}
+
+fn is_current(task_id: &str, run_id: u64) -> bool {
+    terminals()
+        .lock()
+        .ok()
+        .and_then(|terminals| terminals.get(task_id).map(|terminal| terminal.run_id == run_id))
+        .unwrap_or(false)
+}
+
+fn remove_if_current(task_id: &str, run_id: u64) -> Option<AgentTerminalHandle> {
+    let mut terminals = terminals().lock().ok()?;
+    if terminals
+        .get(task_id)
+        .map(|terminal| terminal.run_id == run_id)
+        .unwrap_or(false)
+    {
+        terminals.remove(task_id)
+    } else {
+        None
+    }
 }
 
 fn emit_status(app: &AppHandle, task_id: &str, status: &str, message: &str) {
