@@ -21,10 +21,17 @@ static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SttSettingsInput {
+    pub provider: String,
     pub api_key: String,
     pub api_endpoint: String,
     pub model: String,
     pub workspace_id: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
+    #[serde(default)]
+    pub extra_config: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -33,6 +40,9 @@ pub struct SttSettingsView {
     pub api_endpoint: String,
     pub model: String,
     pub workspace_id: String,
+    pub language: String,
+    pub sample_rate: u32,
+    pub extra_config: String,
     pub has_api_key: bool,
     pub api_key_hint: String,
 }
@@ -124,10 +134,26 @@ pub struct RuntimePiSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct StoredSttSettings {
+    #[serde(default = "default_stt_provider_id")]
+    provider: String,
     api_key: String,
     api_endpoint: String,
     model: String,
     workspace_id: String,
+    #[serde(default)]
+    language: String,
+    #[serde(default = "default_stt_sample_rate")]
+    sample_rate: u32,
+    #[serde(default)]
+    extra_config: String,
+}
+
+fn default_stt_provider_id() -> String {
+    DEFAULT_STT_PROVIDER.to_string()
+}
+
+fn default_stt_sample_rate() -> u32 {
+    16_000
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -213,10 +239,14 @@ pub fn save_stt_settings(
 pub fn runtime_stt_settings(app: &AppHandle) -> Result<SttSettingsInput, String> {
     let stt = read_or_migrate_settings(app)?.stt;
     Ok(SttSettingsInput {
+        provider: stt.provider,
         api_key: stt.api_key,
         api_endpoint: stt.api_endpoint,
         model: stt.model,
         workspace_id: stt.workspace_id,
+        language: stt.language,
+        sample_rate: Some(stt.sample_rate),
+        extra_config: stt.extra_config,
     })
 }
 
@@ -279,19 +309,26 @@ pub fn stt_test_merged(
     let existing = read_or_migrate_settings(app)?;
     let merged = merge_stt_settings(Some(existing.stt), input);
     Ok(SttSettingsInput {
+        provider: merged.provider,
         api_key: merged.api_key,
         api_endpoint: merged.api_endpoint,
         model: merged.model,
         workspace_id: merged.workspace_id,
+        language: merged.language,
+        sample_rate: Some(merged.sample_rate),
+        extra_config: merged.extra_config,
     })
 }
 
 fn stt_view_from_stored(stored: &StoredSttSettings) -> SttSettingsView {
     SttSettingsView {
-        provider: DEFAULT_STT_PROVIDER.to_string(),
+        provider: stored.provider.clone(),
         api_endpoint: stored.api_endpoint.clone(),
         model: stored.model.clone(),
         workspace_id: stored.workspace_id.clone(),
+        language: stored.language.clone(),
+        sample_rate: stored.sample_rate,
+        extra_config: stored.extra_config.clone(),
         has_api_key: !stored.api_key.is_empty(),
         api_key_hint: mask_api_key(&stored.api_key),
     }
@@ -324,6 +361,7 @@ fn merge_stt_settings(
     let api_key = sanitize(&input.api_key).unwrap_or(existing.api_key);
 
     StoredSttSettings {
+        provider: sanitize(&input.provider).unwrap_or(existing.provider),
         api_key,
         api_endpoint: sanitize(&input.api_endpoint)
             .unwrap_or(existing.api_endpoint)
@@ -331,6 +369,9 @@ fn merge_stt_settings(
             .to_string(),
         model: sanitize(&input.model).unwrap_or(existing.model),
         workspace_id: sanitize(&input.workspace_id).unwrap_or_default(),
+        language: input.language.trim().to_string(),
+        sample_rate: input.sample_rate.unwrap_or(existing.sample_rate),
+        extra_config: input.extra_config.trim().to_string(),
     }
 }
 
@@ -465,10 +506,14 @@ fn default_app_settings() -> StoredAppSettings {
 
 fn default_stt_settings() -> StoredSttSettings {
     StoredSttSettings {
+        provider: DEFAULT_STT_PROVIDER.to_string(),
         api_key: String::new(),
         api_endpoint: DEFAULT_STT_API_ENDPOINT.to_string(),
         model: DEFAULT_STT_MODEL.to_string(),
         workspace_id: String::new(),
+        language: String::new(),
+        sample_rate: 16_000,
+        extra_config: String::new(),
     }
 }
 

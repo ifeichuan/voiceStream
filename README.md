@@ -172,6 +172,7 @@ docs/                     product, feature, and technical notes
 - [Prompt design](./docs/prompt-design.md)
 - [VAD notes](./docs/tech/vad.md)
 - [Desktop surface spec](./docs/specs/voice-workbench-layout.md)
+- [STT provider 适配指南](./docs/stt-provider-guide.md)
 
 ## Known Limitations
 
