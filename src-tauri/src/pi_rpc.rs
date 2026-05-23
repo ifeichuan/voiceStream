@@ -69,6 +69,11 @@ impl PiRpcLaunchConfig {
             }),
             PiRpcLaunchMode::AgentSession => {
                 let session_path = app_root.join(".pi/sessions/voice-dictation.jsonl");
+                let mut extension_paths = vec![resolve_voice_feedback_extension(app_root)?];
+                if let Some(extension) = resolve_voicestream_notify_extension(app_root)? {
+                    extension_paths.push(extension);
+                }
+
                 Ok(Self {
                     mode,
                     use_session: true,
@@ -78,7 +83,7 @@ impl PiRpcLaunchConfig {
                     disable_skills: false,
                     disable_prompt_templates: false,
                     disable_themes: false,
-                    extension_paths: vec![resolve_voice_feedback_extension(app_root)?],
+                    extension_paths,
                 })
             }
         }
@@ -447,21 +452,32 @@ fn spawn_pi_rpc_for_agent_session(
     spawn_command(command)
 }
 
-pub(crate) fn agent_terminal_command_parts(session_path: &Path) -> Result<(PathBuf, PathBuf, Vec<String>), String> {
+pub(crate) fn agent_terminal_command_parts(
+    session_path: &Path,
+) -> Result<(PathBuf, PathBuf, Vec<String>), String> {
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
     let runtime = settings::runtime_pi_settings();
-    let mut args = vec![
-        "--session".to_string(),
-        session_path.display().to_string(),
-    ];
+    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root, false)?;
+    let mut args = vec!["--session".to_string(), session_path.display().to_string()];
 
+    push_launch_args(&mut args, &config);
     push_provider_args(&mut args, &runtime);
     eprintln!(
-        "[pi-terminal] cwd={} session={} pi={} provider={} model={}",
+        "[pi-terminal] cwd={} session={} pi={} extensions={} provider={} model={}",
         app_root.display(),
         session_path.display(),
         pi_path.display(),
+        if config.extension_paths.is_empty() {
+            "<none>".to_string()
+        } else {
+            config
+                .extension_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        },
         if runtime.provider.trim().is_empty() {
             "<default>"
         } else {
@@ -495,6 +511,28 @@ fn apply_launch_flags(command: &mut Command, config: &PiRpcLaunchConfig) {
     }
     for extension in &config.extension_paths {
         command.arg("-e").arg(extension);
+    }
+}
+
+fn push_launch_args(args: &mut Vec<String>, config: &PiRpcLaunchConfig) {
+    if config.disable_tools {
+        args.push("--no-tools".to_string());
+    }
+    if config.disable_extensions {
+        args.push("--no-extensions".to_string());
+    }
+    if config.disable_skills {
+        args.push("--no-skills".to_string());
+    }
+    if config.disable_prompt_templates {
+        args.push("--no-prompt-templates".to_string());
+    }
+    if config.disable_themes {
+        args.push("--no-themes".to_string());
+    }
+    for extension in &config.extension_paths {
+        args.push("-e".to_string());
+        args.push(extension.display().to_string());
     }
 }
 
@@ -580,6 +618,7 @@ fn spawn_command(
     ),
     String,
 > {
+    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -723,6 +762,36 @@ fn resolve_voice_feedback_extension(app_root: &Path) -> Result<PathBuf, String> 
             "voice feedback extension not found at {}",
             extension.display()
         ))
+    }
+}
+
+fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBuf>, String> {
+    if let Some(path) = env::var("VOICESTREAM_PI_NOTIFY_EXTENSION")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let normalized = path.canonicalize().unwrap_or(path.clone());
+        if normalized.exists() {
+            return Ok(Some(normalized));
+        }
+
+        return Err(format!(
+            "notify extension from VOICESTREAM_PI_NOTIFY_EXTENSION not found at {}",
+            path.display()
+        ));
+    }
+
+    let extension = app_root.join(".pi/extensions/voicestream-notify/index.ts");
+    if extension.exists() {
+        Ok(Some(extension))
+    } else {
+        eprintln!(
+            "[pi-rpc] notify extension skipped; not found at {}",
+            extension.display()
+        );
+        Ok(None)
     }
 }
 

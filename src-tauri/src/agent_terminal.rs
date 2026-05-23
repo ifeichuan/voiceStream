@@ -57,6 +57,7 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
 
     let mut command = CommandBuilder::new(pi_path.as_os_str());
     command.cwd(app_root.as_os_str());
+    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
     for arg in args {
         command.arg(arg);
     }

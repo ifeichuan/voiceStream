@@ -1,5 +1,5 @@
-mod agent_terminal;
 mod agent_tasks;
+mod agent_terminal;
 mod audio;
 mod native_hud;
 mod pi_rpc;
@@ -13,7 +13,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
@@ -55,6 +55,18 @@ pub struct TimingEvent {
     pub details: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct AgentNotificationEvent {
+    pub task_id: String,
+    pub title: String,
+    pub status: String,
+    pub summary: String,
+    pub display_text: String,
+    pub spoken_text: String,
+    pub channel: String,
+    pub timestamp_ms: u128,
+}
+
 #[derive(Clone)]
 struct ActiveRecording {
     file_path: String,
@@ -82,6 +94,7 @@ static HOTKEY_TIMING: Mutex<Option<HotkeyTiming>> = Mutex::new(None);
 static HOTKEY_MODE: Mutex<HotkeyMode> = Mutex::new(HotkeyMode::Idle);
 static AGENT_SHORTCUT_SLOT: Mutex<Option<Shortcut>> = Mutex::new(None);
 static AGENT_SHORTCUT_LABEL: Mutex<Option<String>> = Mutex::new(None);
+static HUD_HIDE_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RecordingPurpose {
@@ -538,8 +551,7 @@ fn parse_shortcut_text(value: &str) -> Result<Shortcut, String> {
 #[cfg(desktop)]
 fn register_agent_shortcut(app: &AppHandle, shortcut_text: &str) -> Result<(), String> {
     let next_shortcut = parse_shortcut_text(shortcut_text)?;
-    let dictation_shortcut =
-        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+    let dictation_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
 
     if next_shortcut == dictation_shortcut {
         return Err("Agent 快捷键不能和听写快捷键相同。".to_string());
@@ -1045,9 +1057,12 @@ fn handle_hotkey_pressed(app: &AppHandle, purpose: RecordingPurpose) {
 
 fn schedule_hide_hud(app: &AppHandle, delay_ms: u64) {
     let app = app.clone();
+    let token = HUD_HIDE_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-        native_hud::hide(&app);
+        if HUD_HIDE_TOKEN.load(Ordering::SeqCst) == token {
+            native_hud::hide(&app);
+        }
     });
 }
 
@@ -1074,17 +1089,124 @@ async fn run_agent_task_with_pi(
     .map_err(|error| format!("pi agent task join failed: {}", error))?
 }
 
-fn notify_user(title: &str, message: &str) {
-    let script = format!(
-        "display notification {} with title {}",
-        osascript_quote(message),
-        osascript_quote(title)
+fn notify_agent_task_completed(app: &AppHandle, task: &agent_tasks::AgentTask, final_text: &str) {
+    let summary = summarize_notification_text(final_text)
+        .filter(|value| !value.eq_ignore_ascii_case("ok"))
+        .unwrap_or_else(|| task.title.clone());
+    let display_text = format!("完成 · {}", truncate_chars(&summary, 86));
+    let spoken_text = format!("Agent 任务已完成：{}", truncate_chars(&summary, 92));
+
+    emit_agent_notification(
+        app,
+        task,
+        "completed",
+        &summary,
+        &display_text,
+        &spoken_text,
     );
-    let _ = Command::new("osascript").arg("-e").arg(script).status();
+    native_hud::show_success(app, &display_text);
+    schedule_hide_hud(app, 4200);
+    speak_notification(&spoken_text);
 }
 
-fn osascript_quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""))
+fn notify_agent_task_failed(app: &AppHandle, task: &agent_tasks::AgentTask, error: &str) {
+    let summary = summarize_notification_text(error).unwrap_or_else(|| task.title.clone());
+    let display_text = format!("失败 · {}", truncate_chars(&task.title, 86));
+    let spoken_text = format!("Agent 任务失败：{}", truncate_chars(&summary, 92));
+
+    emit_agent_notification(app, task, "failed", &summary, &display_text, &spoken_text);
+    native_hud::show_error(app, &display_text);
+    schedule_hide_hud(app, 4600);
+    speak_notification(&spoken_text);
+}
+
+fn emit_agent_notification(
+    app: &AppHandle,
+    task: &agent_tasks::AgentTask,
+    status: &str,
+    summary: &str,
+    display_text: &str,
+    spoken_text: &str,
+) {
+    let _ = app.emit(
+        "agent-notification",
+        AgentNotificationEvent {
+            task_id: task.id.clone(),
+            title: task.title.clone(),
+            status: status.to_string(),
+            summary: summary.to_string(),
+            display_text: display_text.to_string(),
+            spoken_text: spoken_text.to_string(),
+            channel: "say+hud".to_string(),
+            timestamp_ms: now_unix_ms(),
+        },
+    );
+}
+
+fn speak_notification(text: &str) {
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+
+    let text = text.to_string();
+    thread::spawn(move || {
+        let _ = Command::new("killall")
+            .arg("say")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        match Command::new("say")
+            .arg(&text)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Ok(_) => {}
+            Err(error) => eprintln!("[notify] failed to launch say: {}", error),
+        }
+    });
+}
+
+fn summarize_notification_text(text: &str) -> Option<String> {
+    let normalized = collapse_whitespace(text);
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let sentence_end = trimmed.char_indices().find_map(|(index, ch)| {
+        matches!(ch, '。' | '！' | '？' | '.' | '!' | '?').then_some(index + ch.len_utf8())
+    });
+
+    let summary = match sentence_end {
+        Some(end) if end >= 8 => &trimmed[..end],
+        _ => trimmed,
+    };
+
+    Some(truncate_chars(summary, 140))
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let mut output: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        output.push('…');
+    }
+    output
+}
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 fn maybe_run_pi_startup_self_test() {
@@ -1356,7 +1478,7 @@ async fn finish_agent_transcript(app: &AppHandle, timing_snapshot: &HotkeyTiming
                 ),
             );
             let _ = agent_tasks::mark_completed(app, &task.id, &final_text);
-            notify_user("VoiceStream Agent 完成", &task.title);
+            notify_agent_task_completed(app, &task, &final_text);
             emit_hotkey_state(
                 app,
                 RecordingPurpose::Agent,
@@ -1373,7 +1495,7 @@ async fn finish_agent_transcript(app: &AppHandle, timing_snapshot: &HotkeyTiming
                 &error,
             );
             let _ = agent_tasks::mark_failed(app, &task.id, &error);
-            notify_user("VoiceStream Agent 失败", &task.title);
+            notify_agent_task_failed(app, &task, &error);
             emit_hotkey_state(app, RecordingPurpose::Agent, "error", &error);
         }
     }
@@ -1451,7 +1573,8 @@ pub fn run() {
                 )?;
 
                 let shortcuts = settings::runtime_shortcut_settings(&app.handle())?;
-                if let Err(error) = register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
+                if let Err(error) =
+                    register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
                 {
                     eprintln!("[voicestream] failed to register agent shortcut: {}", error);
                 }

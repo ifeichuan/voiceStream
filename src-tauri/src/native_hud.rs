@@ -14,7 +14,7 @@ mod macos {
 
     const PANEL_HEIGHT: f64 = 42.0;
     const PANEL_MIN_WIDTH: f64 = 148.0;
-    const PANEL_MAX_WIDTH: f64 = 360.0;
+    const PANEL_MAX_WIDTH: f64 = 520.0;
     const PANEL_BOTTOM_MARGIN: f64 = 24.0;
     const PANEL_RADIUS: f64 = PANEL_HEIGHT / 2.0;
     const SHOW_SEED_SIZE: f64 = 34.0;
