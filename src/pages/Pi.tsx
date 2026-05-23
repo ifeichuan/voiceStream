@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useSettingsStore } from "../stores/settings";
 import { PI_MODES, PROMPT_TEMPLATES } from "../lib/constants";
 
 export default function Pi() {
   const { piSettings, setPiSettings, localPi } = useSettingsStore();
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const selectedProvider = useMemo(
     () => localPi.providers.find((p) => p.id === piSettings.provider),
@@ -21,14 +22,6 @@ export default function Pi() {
     () => !piSettings.provider || !localPi.providers.some((p) => p.id === piSettings.provider),
     [localPi.providers, piSettings.provider],
   );
-
-  const applyLocalPiDefaults = () => {
-    setPiSettings((prev) => ({
-      ...prev,
-      provider: localPi.default_provider || prev.provider,
-      model: localPi.default_model || prev.model,
-    }));
-  };
 
   const applyProviderFromLocal = (providerId: string) => {
     const provider = localPi.providers.find((item) => item.id === providerId);
@@ -57,283 +50,206 @@ export default function Pi() {
     }));
   };
 
-  const useNativePiConfig = () => {
-    setPiSettings((prev) => ({
-      ...prev,
-      provider: "",
-      model: "",
-      provider_json: "",
-    }));
-  };
-
   return (
-    <div className="grid gap-[34px] pt-7">
-      <section className="section-divider">
-        <div className="section-head max-[760px]:flex-col max-[760px]:items-start">
-          <div>
-            <h3 className="section-title">Pi</h3>
-            <p className="mt-1.5 text-paper-muted">模型与运行方式。</p>
-          </div>
-          <div className="flex gap-2.5">
-            <button className="btn-ghost" type="button" onClick={applyLocalPiDefaults}>
-              使用本机默认值
-            </button>
-            <button className="btn-ghost" type="button" onClick={useNativePiConfig}>
-              跟随本机 Pi（清空覆盖）
-            </button>
-          </div>
-        </div>
+    <div className="grid gap-12 pt-[2vh]">
+      <section>
+        <h3 className="text-base font-semibold tracking-[-0.03em]">Pi 整理</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">语音文本整理的模型与运行方式。</p>
 
-        <div className="form-grid">
-          <label className="field">
-            <span className="field-label">模式</span>
-            <select
-              className="input"
-              value={piSettings.mode}
-              onChange={(e) => setPiSettings((prev) => ({ ...prev, mode: e.target.value }))}
-            >
-              {PI_MODES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span className="field-label">复用进程</span>
-            <input
-              className="mt-2.5 h-5 min-h-5 w-5 accent-paper-accent"
-              type="checkbox"
-              checked={piSettings.reuse_process}
-              onChange={(e) => setPiSettings((prev) => ({ ...prev, reuse_process: e.target.checked }))}
-            />
-          </label>
-
-          <label className="field">
-            <span className="field-label">Provider</span>
-            <select
-              className="input"
-              value={isManualProvider ? "" : piSettings.provider}
-              onChange={(e) => applyProviderFromLocal(e.target.value)}
-            >
-              <option value="">手动输入</option>
-              {fileProviders.length > 0 && (
-                <optgroup label="本机 models.json">
-                  {fileProviders.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.id}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {nativeProviders.length > 0 && (
-                <optgroup label="Pi 原生可用（CLI）">
-                  {nativeProviders.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.id}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-            {isManualProvider && (
-              <input
-                className="input"
-                type="text"
-                value={piSettings.provider}
-                onChange={(e) => setPiSettings((prev) => ({ ...prev, provider: e.target.value }))}
-                placeholder="例如：github-copilot"
-              />
-            )}
-          </label>
-
-          <label className="field">
-            <span className="field-label">模型</span>
-            {selectedProvider && selectedProvider.models.length > 0 ? (
+        <div className="mt-8 grid gap-0">
+          {/* Mode */}
+          <div className="form-row">
+            <span className="form-row-label">模式</span>
+            <div className="form-row-control">
               <select
-                className="input"
-                value={
-                  selectedProvider.models.some((m) => m.id === piSettings.model)
-                    ? piSettings.model
-                    : ""
-                }
-                onChange={(e) =>
-                  setPiSettings((prev) => ({ ...prev, model: e.target.value || prev.model }))
-                }
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={piSettings.mode}
+                onChange={(e) => setPiSettings((prev) => ({ ...prev, mode: e.target.value }))}
               >
-                {selectedProvider.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name !== model.id ? `${model.name} (${model.id})` : model.id}
+                {PI_MODES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
-            ) : (
-              <input
-                className="input"
-                type="text"
-                value={piSettings.model}
-                onChange={(e) => setPiSettings((prev) => ({ ...prev, model: e.target.value }))}
-                placeholder="qwen3.5-flash"
-              />
-            )}
-          </label>
-        </div>
-      </section>
-
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">本机 Pi</h3>
-            <p className="mt-1.5 text-paper-muted">本机配置映射。</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-5 max-[900px]:grid-cols-1">
-          <div className="meta-card">
-            <span className="field-label">settings.json</span>
-            <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
-              {localPi.settings_path || "未找到"}
-            </strong>
-          </div>
-          <div className="meta-card">
-            <span className="field-label">models.json</span>
-            <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
-              {localPi.models_path || "未找到"}
-            </strong>
-          </div>
-          <div className="meta-card">
-            <span className="field-label">默认 Provider</span>
-            <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
-              {localPi.default_provider || "未设置"}
-            </strong>
-          </div>
-          <div className="meta-card">
-            <span className="field-label">默认模型</span>
-            <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
-              {localPi.default_model || "未设置"}
-            </strong>
-          </div>
-        </div>
-
-        <div className="grid gap-0">
-          {fileProviders.map((provider) => (
-            <button
-              key={provider.id}
-              type="button"
-              className={[
-                "flex w-full items-baseline justify-between gap-5 border-b border-paper-line bg-transparent py-4 text-left transition duration-150 hover:-translate-y-px max-[760px]:flex-col max-[760px]:items-start",
-                piSettings.provider === provider.id ? "text-paper-accent" : "",
-              ].join(" ")}
-              onClick={() => applyProviderFromLocal(provider.id)}
-            >
-              <div>
-                <strong className="block text-base font-semibold">{provider.id}</strong>
-                <p className="mt-1 break-all text-paper-muted">{provider.base_url || "无 baseUrl"}</p>
-              </div>
-              <span>{provider.models.length} 个模型</span>
-            </button>
-          ))}
-
-          {nativeProviders.length > 0 && (
-            <div className="mt-4 border-t border-paper-line pt-3">
-              <p className="field-label">Pi 原生可用 Provider（CLI）</p>
-              {nativeProviders.map((provider) => (
-                <button
-                  key={provider.id}
-                  type="button"
-                  className={[
-                    "flex w-full items-baseline justify-between gap-5 border-b border-paper-line bg-transparent py-4 text-left transition duration-150 hover:-translate-y-px max-[760px]:flex-col max-[760px]:items-start",
-                    piSettings.provider === provider.id ? "text-paper-accent" : "",
-                  ].join(" ")}
-                  onClick={() => applyProviderFromLocal(provider.id)}
-                >
-                  <div>
-                    <strong className="block text-base font-semibold">{provider.id}</strong>
-                    <p className="mt-1 break-all text-paper-muted">来自 pi --list-models</p>
-                  </div>
-                  <span>{provider.models.length} 个模型</span>
-                </button>
-              ))}
             </div>
-          )}
+          </div>
+
+          {/* Provider */}
+          <div className="form-row">
+            <span className="form-row-label">服务商</span>
+            <div className="form-row-control">
+              <select
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={isManualProvider ? "" : piSettings.provider}
+                onChange={(e) => applyProviderFromLocal(e.target.value)}
+              >
+                <option value="">手动输入</option>
+                {fileProviders.length > 0 && (
+                  <optgroup label="本机 models.json">
+                    {fileProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.id}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {nativeProviders.length > 0 && (
+                  <optgroup label="Pi 原生可用">
+                    {nativeProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.id}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {isManualProvider && piSettings.provider && (
+                <input
+                  className="mt-2 w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  type="text"
+                  value={piSettings.provider}
+                  onChange={(e) => setPiSettings((prev) => ({ ...prev, provider: e.target.value }))}
+                  placeholder="例如：github-copilot"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Model */}
+          <div className="form-row">
+            <span className="form-row-label">模型</span>
+            <div className="form-row-control">
+              {selectedProvider && selectedProvider.models.length > 0 ? (
+                <select
+                  className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  value={
+                    selectedProvider.models.some((m) => m.id === piSettings.model)
+                      ? piSettings.model
+                      : ""
+                  }
+                  onChange={(e) =>
+                    setPiSettings((prev) => ({ ...prev, model: e.target.value || prev.model }))
+                  }
+                >
+                  {selectedProvider.models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name !== model.id ? `${model.name} (${model.id})` : model.id}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  type="text"
+                  value={piSettings.model}
+                  onChange={(e) => setPiSettings((prev) => ({ ...prev, model: e.target.value }))}
+                  placeholder="qwen3.5-flash"
+                />
+              )}
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">模板与覆盖</h3>
-            <p className="mt-1.5 text-paper-muted">编辑这里，不直接改本机文件。</p>
+      {/* Advanced options */}
+      <section>
+        <button
+          type="button"
+          className="flex min-h-10 min-w-10 items-center gap-2 rounded bg-transparent text-[0.86rem] text-paper-muted transition-colors duration-150 hover:text-paper-ink active:scale-[0.96]"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          aria-expanded={showAdvanced}
+        >
+          <span className="text-[0.75rem]">{showAdvanced ? "▾" : "▸"}</span>
+          更多选项
+        </button>
+
+        {showAdvanced && (
+          <div className="mt-6 grid gap-8">
+            {/* Reuse process */}
+            <div className="form-row">
+              <span className="form-row-label">复用进程</span>
+              <div className="form-row-control flex justify-end">
+                <input
+                  className="h-5 w-5 accent-paper-accent"
+                  type="checkbox"
+                  checked={piSettings.reuse_process}
+                  onChange={(e) =>
+                    setPiSettings((prev) => ({ ...prev, reuse_process: e.target.checked }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Prompt template */}
+            <div className="grid gap-3">
+              <span className="text-[0.86rem] text-paper-ink">预设模板</span>
+              <select
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={piSettings.prompt_template_key}
+                onChange={(e) =>
+                  setPiSettings((prev) => ({ ...prev, prompt_template_key: e.target.value }))
+                }
+              >
+                {PROMPT_TEMPLATES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Custom prompt */}
+            <div className="grid gap-3">
+              <span className="text-[0.86rem] text-paper-ink">自定义提示词</span>
+              <textarea
+                className="min-h-[100px] w-full resize-y rounded border-b border-paper-line bg-transparent px-0 py-2 font-mono text-[0.82rem] leading-[1.65] text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                rows={6}
+                value={piSettings.custom_prompt_template}
+                onChange={(e) =>
+                  setPiSettings((prev) => ({ ...prev, custom_prompt_template: e.target.value }))
+                }
+                placeholder="{text}"
+              />
+            </div>
+
+            {/* Provider JSON override */}
+            <div className="grid gap-3">
+              <span className="text-[0.86rem] text-paper-ink">服务商 JSON 覆盖</span>
+              <textarea
+                className="min-h-[100px] w-full resize-y rounded border-b border-paper-line bg-transparent px-0 py-2 font-mono text-[0.82rem] leading-[1.65] text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                rows={8}
+                value={piSettings.provider_json}
+                onChange={(e) =>
+                  setPiSettings((prev) => ({ ...prev, provider_json: e.target.value }))
+                }
+                placeholder='{"providers": {...}}'
+              />
+              <small className="text-[0.75rem] text-paper-muted">
+                只写入应用设置，不会修改本机文件。
+              </small>
+            </div>
+
+            {/* Local Pi reference (read-only) */}
+            <div className="grid gap-4 pt-4">
+              <p className="text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-paper-muted">
+                本机参考（只读）
+              </p>
+              <div className="form-row">
+                <span className="text-[0.82rem] text-paper-muted">默认服务商</span>
+                <span className="text-[0.86rem] font-semibold">
+                  {localPi.default_provider || "未设置"}
+                </span>
+              </div>
+              <div className="form-row">
+                <span className="text-[0.82rem] text-paper-muted">默认模型</span>
+                <span className="text-[0.86rem] font-semibold">
+                  {localPi.default_model || "未设置"}
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-y-[26px]">
-          <label className="field">
-            <span className="field-label">预设</span>
-            <select
-              className="input"
-              value={piSettings.prompt_template_key}
-              onChange={(e) =>
-                setPiSettings((prev) => ({ ...prev, prompt_template_key: e.target.value }))
-              }
-            >
-              {PROMPT_TEMPLATES.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span className="field-label">提示词模板</span>
-            <textarea
-              className="textarea"
-              rows={11}
-              value={piSettings.custom_prompt_template}
-              onChange={(e) =>
-                setPiSettings((prev) => ({ ...prev, custom_prompt_template: e.target.value }))
-              }
-              placeholder="{text}"
-            />
-            <small className="text-paper-muted">用于覆盖默认模板。</small>
-          </label>
-
-          <label className="field">
-            <span className="field-label">Provider JSON 覆盖</span>
-            <textarea
-              className="textarea"
-              rows={12}
-              value={piSettings.provider_json}
-              onChange={(e) =>
-                setPiSettings((prev) => ({ ...prev, provider_json: e.target.value }))
-              }
-              placeholder='{"providers": {...}}'
-            />
-            <small className="text-paper-muted">只写入应用设置，不会修改 ~/.pi/agent/models.json。</small>
-          </label>
-        </div>
-      </section>
-
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">本机文件参考</h3>
-            <p className="mt-1.5 text-paper-muted">只读，用于对照。</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-y-[26px]">
-          <label className="field">
-            <span className="field-label">~/.pi/agent/settings.json（只读）</span>
-            <textarea className="textarea" rows={8} value={localPi.raw_settings_json} readOnly />
-          </label>
-          <label className="field">
-            <span className="field-label">~/.pi/agent/models.json（只读）</span>
-            <textarea className="textarea" rows={14} value={localPi.raw_models_json} readOnly />
-          </label>
-        </div>
+        )}
       </section>
     </div>
   );
