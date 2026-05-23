@@ -1,13 +1,21 @@
 import "@fontsource-variable/geist-mono";
 import ReactDOM from "react-dom/client";
-import { HashRouter, Route, Routes } from "react-router-dom";
+import { RouterProvider, createRouter, createHashHistory } from "@tanstack/react-router";
+import { routeTree } from "./routeTree.gen";
 import "./App.css";
-import App from "./App";
+
+const router = createRouter({
+  routeTree,
+  history: createHashHistory(),
+  defaultPreload: "intent",
+});
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <HashRouter>
-    <Routes>
-      <Route path="*" element={<App />} />
-    </Routes>
-  </HashRouter>
+  <RouterProvider router={router} />
 );
