@@ -10,71 +10,58 @@ export default function Activity() {
   const agentNotifications = useAgentStore((state) => state.agentNotifications);
 
   return (
-    <div className="grid gap-8 pt-7">
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">Notify Channel</h3>
-            <p className="mt-1.5 text-paper-muted">VoiceStream 语音通知。</p>
-          </div>
-        </div>
+    <div className="grid gap-12 pt-[2vh]">
+      <section>
+        <h3 className="text-base font-semibold tracking-[-0.03em]">通知</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">VoiceStream 语音通知。</p>
 
-        <div className="grid gap-3 border-b border-paper-line pb-3">
+        <div className="mt-6 grid gap-4">
           {agentNotifications.length === 0 && <div className="text-paper-muted">暂无通知。</div>}
           {agentNotifications.map((notification) => (
             <div
               key={`${notification.task_id}-${notification.timestamp_ms}`}
-              className="grid gap-1 border-b border-paper-line py-3 first:pt-0 last:border-b-0"
+              className="grid gap-1 py-2"
             >
               <div className="flex items-baseline justify-between gap-4 max-[760px]:flex-col max-[760px]:items-start">
-                <strong className="text-[0.95rem] font-semibold">
+                <strong className="text-[0.88rem] font-semibold">
                   {notification.status === "failed" ? "失败" : "完成"} · {notification.title}
                 </strong>
-                <span className="shrink-0 text-[0.75rem] text-paper-muted">
+                <span className="shrink-0 text-[0.75rem] tabular-nums text-paper-muted">
                   {new Date(notification.timestamp_ms).toLocaleTimeString()}
                 </span>
               </div>
-              <p className="m-0 text-[0.86rem] text-paper-muted [line-height:1.55]">
+              <p className="m-0 text-[0.82rem] text-paper-muted [line-height:1.55]">
                 {notification.summary}
               </p>
-              <small className="text-[0.75rem] text-paper-muted">
-                {notification.channel} · {notification.spoken_text}
-              </small>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">转写</h3>
-            <p className="mt-1.5 text-paper-muted">转写结果。</p>
-          </div>
-        </div>
+      <section>
+        <h3 className="text-base font-semibold tracking-[-0.03em]">转写</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">转写结果。</p>
 
-        <div className="min-h-[180px] border-b border-paper-line bg-transparent pb-3">
+        <div className="mt-6 min-h-[120px]">
           {finalTranscript.map((line, index) => (
-            <div key={`${line}-${index}`} className="mt-2 first:mt-0">
+            <div key={`${line}-${index}`} className="mt-2 text-[0.88rem] first:mt-0">
               {line}
             </div>
           ))}
-          {partialTranscript && <div className="mt-2 text-paper-accent">{partialTranscript}</div>}
+          {partialTranscript && (
+            <div className="mt-2 text-[0.88rem] text-paper-accent">{partialTranscript}</div>
+          )}
           {finalTranscript.length === 0 && !partialTranscript && (
-            <div className="text-paper-muted">暂无转写结果。</div>
+            <div className="text-[0.88rem] text-paper-muted">暂无转写结果。</div>
           )}
         </div>
       </section>
 
-      <section className="section-divider">
-        <div className="section-head">
-          <div>
-            <h3 className="section-title">活动日志</h3>
-            <p className="mt-1.5 text-paper-muted">{settingsStatus}</p>
-          </div>
-        </div>
+      <section>
+        <h3 className="text-base font-semibold tracking-[-0.03em]">日志</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">{settingsStatus}</p>
 
-        <div className="max-h-80 overflow-auto border-b border-paper-line bg-transparent pb-3 font-mono text-[0.88rem] [line-height:1.6]">
+        <div className="mt-6 max-h-80 overflow-auto font-mono text-[0.82rem] leading-[1.65]">
           {logs.map((line, index) => (
             <div key={`${line}-${index}`} className="mt-2 first:mt-0">
               {line}
@@ -82,11 +69,9 @@ export default function Activity() {
           ))}
         </div>
 
-        <div className="flex items-baseline justify-between gap-4 py-3.5 max-[760px]:flex-col max-[760px]:items-start">
-          <span className="text-paper-muted">最近音频包</span>
-          <strong className="block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
-            {lastChunkInfo}
-          </strong>
+        <div className="mt-6 flex items-baseline justify-between gap-4">
+          <span className="text-[0.82rem] text-paper-muted">最近音频包</span>
+          <span className="text-[0.88rem] font-semibold">{lastChunkInfo}</span>
         </div>
       </section>
     </div>
