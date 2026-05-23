@@ -27,8 +27,23 @@ export interface SttSettingsView {
   api_endpoint: string;
   model: string;
   workspace_id: string;
+  language: string;
+  sample_rate: number;
+  extra_config: string;
   has_api_key: boolean;
   api_key_hint: string;
+}
+
+export interface SttProviderMeta {
+  id: string;
+  label: string;
+  needs_api_key: boolean;
+  needs_endpoint: boolean;
+  needs_model: boolean;
+  needs_workspace_id: boolean;
+  default_endpoint: string;
+  default_model: string;
+  default_sample_rate: number;
 }
 
 export interface LocalPiModelView {
