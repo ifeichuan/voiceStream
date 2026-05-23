@@ -447,6 +447,36 @@ fn spawn_pi_rpc_for_agent_session(
     spawn_command(command)
 }
 
+pub(crate) fn agent_terminal_command_parts(session_path: &Path) -> Result<(PathBuf, PathBuf, Vec<String>), String> {
+    let pi_path = resolve_pi_path();
+    let app_root = resolve_app_root()?;
+    let runtime = settings::runtime_pi_settings();
+    let mut args = vec![
+        "--session".to_string(),
+        session_path.display().to_string(),
+    ];
+
+    push_provider_args(&mut args, &runtime);
+    eprintln!(
+        "[pi-terminal] cwd={} session={} pi={} provider={} model={}",
+        app_root.display(),
+        session_path.display(),
+        pi_path.display(),
+        if runtime.provider.trim().is_empty() {
+            "<default>"
+        } else {
+            runtime.provider.as_str()
+        },
+        if runtime.model.trim().is_empty() {
+            "<default>"
+        } else {
+            runtime.model.as_str()
+        }
+    );
+
+    Ok((pi_path, app_root, args))
+}
+
 fn apply_launch_flags(command: &mut Command, config: &PiRpcLaunchConfig) {
     if config.disable_tools {
         command.arg("--no-tools");
@@ -475,6 +505,18 @@ fn apply_provider_flags(command: &mut Command, runtime: &settings::RuntimePiSett
 
     if !runtime.model.trim().is_empty() {
         command.arg("--model").arg(&runtime.model);
+    }
+}
+
+fn push_provider_args(args: &mut Vec<String>, runtime: &settings::RuntimePiSettings) {
+    if !runtime.provider.trim().is_empty() {
+        args.push("--provider".to_string());
+        args.push(runtime.provider.clone());
+    }
+
+    if !runtime.model.trim().is_empty() {
+        args.push("--model".to_string());
+        args.push(runtime.model.clone());
     }
 }
 

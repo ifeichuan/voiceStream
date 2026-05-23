@@ -1,3 +1,4 @@
+mod agent_terminal;
 mod agent_tasks;
 mod audio;
 mod native_hud;
@@ -16,10 +17,11 @@ use std::time::Instant;
 use std::{env, thread};
 use stt::SttProvider;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
-use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState,
+};
 
-const DICTATION_SHORTCUT: &str = "Cmd+Shift+Space";
-const AGENT_SHORTCUT: &str = "Cmd+Shift+A";
+pub(crate) const DICTATION_SHORTCUT: &str = "Cmd+Shift+Space";
 const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
 const HOTKEY_TAP_THRESHOLD_MS: u128 = 220;
 
@@ -78,6 +80,8 @@ static AGENT_HOTKEY_ARMED: AtomicBool = AtomicBool::new(true);
 static HOTKEY_SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_TIMING: Mutex<Option<HotkeyTiming>> = Mutex::new(None);
 static HOTKEY_MODE: Mutex<HotkeyMode> = Mutex::new(HotkeyMode::Idle);
+static AGENT_SHORTCUT_SLOT: Mutex<Option<Shortcut>> = Mutex::new(None);
+static AGENT_SHORTCUT_LABEL: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RecordingPurpose {
@@ -86,10 +90,10 @@ enum RecordingPurpose {
 }
 
 impl RecordingPurpose {
-    fn shortcut(self) -> &'static str {
+    fn shortcut(self) -> String {
         match self {
-            RecordingPurpose::Dictation => DICTATION_SHORTCUT,
-            RecordingPurpose::Agent => AGENT_SHORTCUT,
+            RecordingPurpose::Dictation => DICTATION_SHORTCUT.to_string(),
+            RecordingPurpose::Agent => current_agent_shortcut_label(),
         }
     }
 
@@ -161,6 +165,31 @@ fn get_agent_session(task_id: String) -> Result<agent_tasks::AgentSessionView, S
 }
 
 #[tauri::command]
+fn start_agent_terminal(
+    app: AppHandle,
+    task_id: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<(), String> {
+    agent_terminal::start(app, &task_id, cols.unwrap_or(100), rows.unwrap_or(30))
+}
+
+#[tauri::command]
+fn write_agent_terminal(task_id: String, data: String) -> Result<(), String> {
+    agent_terminal::write(&task_id, &data)
+}
+
+#[tauri::command]
+fn resize_agent_terminal(task_id: String, cols: u16, rows: u16) -> Result<(), String> {
+    agent_terminal::resize(&task_id, cols, rows)
+}
+
+#[tauri::command]
+fn stop_agent_terminal(task_id: String) {
+    agent_terminal::stop(&task_id);
+}
+
+#[tauri::command]
 async fn continue_agent_task(
     app: AppHandle,
     task_id: String,
@@ -211,7 +240,22 @@ fn save_app_settings(
     app: AppHandle,
     settings: settings::AppSettingsInput,
 ) -> Result<settings::AppSettingsView, String> {
-    let saved = settings::save_app_settings(&app, settings)?;
+    let previous_shortcuts = settings::runtime_shortcut_settings(&app)?;
+    let next_agent_shortcut = settings.shortcuts.agent_shortcut.trim();
+    let next_agent_shortcut = if next_agent_shortcut.is_empty() {
+        previous_shortcuts.agent_shortcut.clone()
+    } else {
+        next_agent_shortcut.to_string()
+    };
+
+    register_agent_shortcut(&app, &next_agent_shortcut)?;
+    let saved = match crate::settings::save_app_settings(&app, settings) {
+        Ok(saved) => saved,
+        Err(error) => {
+            let _ = register_agent_shortcut(&app, &previous_shortcuts.agent_shortcut);
+            return Err(error);
+        }
+    };
 
     // Pi dictation fast mode may reuse a long-lived rpc process.
     // Restart it after settings changes so provider/model updates apply immediately.
@@ -422,10 +466,122 @@ fn emit_hotkey_state(app: &AppHandle, purpose: RecordingPurpose, state: &str, me
         HotkeySessionEvent {
             state: state.to_string(),
             message: message.to_string(),
-            shortcut: purpose.shortcut().to_string(),
+            shortcut: purpose.shortcut(),
             purpose: purpose.as_str().to_string(),
         },
     );
+}
+
+fn current_agent_shortcut_label() -> String {
+    AGENT_SHORTCUT_LABEL
+        .lock()
+        .ok()
+        .and_then(|label| label.clone())
+        .unwrap_or_else(|| settings::DEFAULT_AGENT_SHORTCUT.to_string())
+}
+
+fn is_current_agent_shortcut(shortcut: &Shortcut) -> bool {
+    AGENT_SHORTCUT_SLOT
+        .lock()
+        .map(|slot| slot.as_ref() == Some(shortcut))
+        .unwrap_or(false)
+}
+
+#[cfg(desktop)]
+fn handle_global_shortcut(
+    dictation_shortcut: &Shortcut,
+    app: &AppHandle,
+    shortcut: &Shortcut,
+    event: ShortcutEvent,
+) {
+    let shortcut_purpose = if shortcut == dictation_shortcut {
+        Some(RecordingPurpose::Dictation)
+    } else if is_current_agent_shortcut(shortcut) {
+        Some(RecordingPurpose::Agent)
+    } else {
+        None
+    };
+
+    let Some(purpose) = shortcut_purpose else {
+        return;
+    };
+
+    let armed = match purpose {
+        RecordingPurpose::Dictation => &DICTATION_HOTKEY_ARMED,
+        RecordingPurpose::Agent => &AGENT_HOTKEY_ARMED,
+    };
+
+    match event.state() {
+        ShortcutState::Pressed => {
+            if armed.swap(false, Ordering::SeqCst) {
+                handle_hotkey_pressed(app, purpose);
+            }
+        }
+        ShortcutState::Released => {
+            armed.store(true, Ordering::SeqCst);
+            handle_hotkey_released(app, purpose);
+        }
+    }
+}
+
+fn parse_shortcut_text(value: &str) -> Result<Shortcut, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("Agent 快捷键不能为空。".to_string());
+    }
+
+    trimmed
+        .parse::<Shortcut>()
+        .map_err(|error| format!("Agent 快捷键格式无效：{}。", error))
+}
+
+#[cfg(desktop)]
+fn register_agent_shortcut(app: &AppHandle, shortcut_text: &str) -> Result<(), String> {
+    let next_shortcut = parse_shortcut_text(shortcut_text)?;
+    let dictation_shortcut =
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+
+    if next_shortcut == dictation_shortcut {
+        return Err("Agent 快捷键不能和听写快捷键相同。".to_string());
+    }
+
+    let previous_shortcut = AGENT_SHORTCUT_SLOT
+        .lock()
+        .map_err(|_| "Agent shortcut lock poisoned".to_string())?
+        .to_owned();
+
+    if previous_shortcut == Some(next_shortcut) {
+        if let Ok(mut label) = AGENT_SHORTCUT_LABEL.lock() {
+            *label = Some(shortcut_text.trim().to_string());
+        }
+        return Ok(());
+    }
+
+    if let Some(previous) = previous_shortcut {
+        let _ = app.global_shortcut().unregister(previous);
+    }
+
+    if let Err(error) = app.global_shortcut().register(next_shortcut) {
+        if let Some(previous) = previous_shortcut {
+            let _ = app.global_shortcut().register(previous);
+        }
+        return Err(format!("注册 Agent 快捷键失败：{}", error));
+    }
+
+    *AGENT_SHORTCUT_SLOT
+        .lock()
+        .map_err(|_| "Agent shortcut lock poisoned".to_string())? = Some(next_shortcut);
+    *AGENT_SHORTCUT_LABEL
+        .lock()
+        .map_err(|_| "Agent shortcut label lock poisoned".to_string())? =
+        Some(shortcut_text.trim().to_string());
+
+    Ok(())
+}
+
+#[cfg(not(desktop))]
+fn register_agent_shortcut(_app: &AppHandle, _shortcut_text: &str) -> Result<(), String> {
+    Ok(())
 }
 
 fn replace_recording_stream(stream: Option<cpal::Stream>) {
@@ -1284,45 +1440,21 @@ pub fn run() {
                 native_hud::initialize(&app.handle());
                 let dictation_shortcut =
                     Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
-                let agent_shortcut =
-                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyA);
 
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_shortcut(dictation_shortcut.clone())?
-                        .with_shortcut(agent_shortcut.clone())?
                         .with_handler(move |app, shortcut, event| {
-                            let shortcut_purpose = if shortcut == &dictation_shortcut {
-                                Some(RecordingPurpose::Dictation)
-                            } else if shortcut == &agent_shortcut {
-                                Some(RecordingPurpose::Agent)
-                            } else {
-                                None
-                            };
-
-                            let Some(purpose) = shortcut_purpose else {
-                                return;
-                            };
-
-                            let armed = match purpose {
-                                RecordingPurpose::Dictation => &DICTATION_HOTKEY_ARMED,
-                                RecordingPurpose::Agent => &AGENT_HOTKEY_ARMED,
-                            };
-
-                            match event.state() {
-                                ShortcutState::Pressed => {
-                                    if armed.swap(false, Ordering::SeqCst) {
-                                        handle_hotkey_pressed(app, purpose);
-                                    }
-                                }
-                                ShortcutState::Released => {
-                                    armed.store(true, Ordering::SeqCst);
-                                    handle_hotkey_released(app, purpose);
-                                }
-                            }
+                            handle_global_shortcut(&dictation_shortcut, app, shortcut, event);
                         })
                         .build(),
                 )?;
+
+                let shortcuts = settings::runtime_shortcut_settings(&app.handle())?;
+                if let Err(error) = register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
+                {
+                    eprintln!("[voicestream] failed to register agent shortcut: {}", error);
+                }
             }
 
             pi_rpc::warmup();
@@ -1333,6 +1465,10 @@ pub fn run() {
             get_stt_settings,
             get_agent_tasks,
             get_agent_session,
+            start_agent_terminal,
+            write_agent_terminal,
+            resize_agent_terminal,
+            stop_agent_terminal,
             continue_agent_task,
             save_stt_settings,
             test_stt_settings,
@@ -1346,6 +1482,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
             if matches!(event, RunEvent::Exit) {
+                agent_terminal::shutdown_all();
                 pi_rpc::shutdown_reusable_process()
             }
         });

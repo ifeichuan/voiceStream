@@ -45,4 +45,168 @@
   button {
     @apply cursor-pointer border-0;
   }
+
+}
+
+.agent-terminal.wterm {
+  --term-bg: oklch(0.985 0.003 85);
+  --term-fg: oklch(0.23 0.015 60);
+  --term-cursor: oklch(0.38 0.04 55);
+  --term-color-0: oklch(0.25 0.012 65);
+  --term-color-1: oklch(0.56 0.17 28);
+  --term-color-2: oklch(0.47 0.12 142);
+  --term-color-3: oklch(0.54 0.11 86);
+  --term-color-4: oklch(0.48 0.11 242);
+  --term-color-5: oklch(0.5 0.12 315);
+  --term-color-6: oklch(0.5 0.09 195);
+  --term-color-7: oklch(0.89 0.006 78);
+  --term-color-8: oklch(0.58 0.01 72);
+  --term-color-9: oklch(0.62 0.17 28);
+  --term-color-10: oklch(0.55 0.12 142);
+  --term-color-11: oklch(0.62 0.11 86);
+  --term-color-12: oklch(0.57 0.12 242);
+  --term-color-13: oklch(0.58 0.12 315);
+  --term-color-14: oklch(0.58 0.09 195);
+  --term-color-15: oklch(0.18 0.012 65);
+  --term-font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --term-font-size: 12.5px;
+  --term-row-height: 18px;
+
+  width: 100%;
+  height: 100% !important;
+  min-height: 0;
+  border: 1px solid var(--color-paper-line);
+  border-radius: 0;
+  box-shadow: none;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.agent-loading-wave {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 52px;
+  padding: 0 16px;
+}
+
+.agent-loading-wave span {
+  display: block;
+  width: 4px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--color-paper-accent);
+  opacity: 0.72;
+  transform-origin: center;
+  animation-name: agent-wave-pulse;
+  animation-duration: 960ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.36, 0, 0.2, 1);
+}
+
+.agent-loading-wave span:nth-child(1) {
+  animation-delay: -120ms;
+  animation-duration: 880ms;
+}
+
+.agent-loading-wave span:nth-child(2) {
+  animation-delay: -420ms;
+  animation-duration: 1100ms;
+}
+
+.agent-loading-wave span:nth-child(3) {
+  animation-delay: -260ms;
+  animation-duration: 820ms;
+}
+
+.agent-loading-wave span:nth-child(4) {
+  animation-delay: -540ms;
+  animation-duration: 1040ms;
+}
+
+.agent-loading-wave span:nth-child(5) {
+  animation-delay: -80ms;
+  animation-duration: 900ms;
+}
+
+.agent-loading-wave span:nth-child(6) {
+  animation-delay: -360ms;
+  animation-duration: 1180ms;
+}
+
+.agent-loading-wave span:nth-child(7) {
+  animation-delay: -180ms;
+  animation-duration: 860ms;
+}
+
+.agent-loading-wave span:nth-child(8) {
+  animation-delay: -500ms;
+  animation-duration: 980ms;
+}
+
+.agent-loading-wave span:nth-child(9) {
+  animation-delay: -300ms;
+  animation-duration: 1120ms;
+}
+
+@keyframes agent-wave-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.42);
+    opacity: 0.42;
+  }
+
+  32% {
+    transform: scaleY(1.85);
+    opacity: 0.82;
+  }
+
+  58% {
+    transform: scaleY(0.74);
+    opacity: 0.56;
+  }
+
+  78% {
+    transform: scaleY(1.28);
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-loading-wave span {
+    animation: none;
+  }
+
+  .agent-loading-wave span:nth-child(odd) {
+    height: 22px;
+  }
+
+  .agent-loading-wave span:nth-child(even) {
+    height: 12px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .agent-terminal.wterm {
+    --term-bg: oklch(0.18 0.011 65);
+    --term-fg: oklch(0.88 0.008 78);
+    --term-cursor: oklch(0.76 0.07 86);
+    --term-color-0: oklch(0.18 0.011 65);
+    --term-color-1: oklch(0.67 0.18 28);
+    --term-color-2: oklch(0.7 0.11 142);
+    --term-color-3: oklch(0.75 0.11 86);
+    --term-color-4: oklch(0.67 0.09 242);
+    --term-color-5: oklch(0.68 0.1 315);
+    --term-color-6: oklch(0.72 0.08 195);
+    --term-color-7: oklch(0.89 0.008 78);
+    --term-color-8: oklch(0.58 0.01 72);
+    --term-color-9: oklch(0.73 0.18 28);
+    --term-color-10: oklch(0.76 0.11 142);
+    --term-color-11: oklch(0.82 0.11 86);
+    --term-color-12: oklch(0.75 0.09 242);
+    --term-color-13: oklch(0.75 0.1 315);
+    --term-color-14: oklch(0.8 0.08 195);
+    --term-color-15: oklch(0.96 0.006 78);
+  }
 }

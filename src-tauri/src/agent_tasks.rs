@@ -512,9 +512,8 @@ fn render_content_items(items: &[Value], tool_name: &mut String) -> String {
                 }
             }
             Some("thinking") => {
-                if let Some(text) = item.get("thinking").and_then(Value::as_str) {
-                    parts.push(format!("思考\n{}", text));
-                }
+                // Keep chain-of-thought out of the rendered UI. The session keeps the
+                // raw event for debugging, but the product surface should stay concise.
             }
             Some("toolCall") => {
                 let name = item

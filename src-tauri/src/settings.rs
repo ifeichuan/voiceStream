@@ -15,6 +15,7 @@ const DEFAULT_STT_MODEL: &str = "fun-asr-realtime";
 const DEFAULT_STT_API_ENDPOINT: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference";
 const DEFAULT_PI_MODE: &str = "dictation-fast";
 const DEFAULT_PROMPT_TEMPLATE_KEY: &str = "default";
+pub const DEFAULT_AGENT_SHORTCUT: &str = "Cmd+Shift+A";
 
 static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -51,6 +52,12 @@ pub struct PiSettingsInput {
 pub struct AppSettingsInput {
     pub stt: SttSettingsInput,
     pub pi: PiSettingsInput,
+    pub shortcuts: ShortcutSettingsInput,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ShortcutSettingsInput {
+    pub agent_shortcut: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -68,7 +75,14 @@ pub struct PiSettingsView {
 pub struct AppSettingsView {
     pub stt: SttSettingsView,
     pub pi: PiSettingsView,
+    pub shortcuts: ShortcutSettingsView,
     pub local_pi: LocalPiConfigView,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ShortcutSettingsView {
+    pub dictation_shortcut: String,
+    pub agent_shortcut: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -128,10 +142,17 @@ struct StoredPiSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct StoredShortcutSettings {
+    agent_shortcut: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct StoredAppSettings {
     version: u32,
     stt: StoredSttSettings,
     pi: StoredPiSettings,
+    #[serde(default = "default_shortcuts_settings")]
+    shortcuts: StoredShortcutSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -150,6 +171,7 @@ pub fn load_app_settings_view(app: &AppHandle) -> Result<AppSettingsView, String
     Ok(AppSettingsView {
         stt: stt_view_from_stored(&stored.stt),
         pi: pi_view_from_stored(&stored.pi),
+        shortcuts: shortcuts_view_from_stored(&stored.shortcuts),
         local_pi: read_local_pi_config(),
     })
 }
@@ -163,6 +185,7 @@ pub fn save_app_settings(
         version: 1,
         stt: merge_stt_settings(Some(existing.stt), input.stt),
         pi: merge_pi_settings(Some(existing.pi), input.pi),
+        shortcuts: merge_shortcut_settings(Some(existing.shortcuts), input.shortcuts),
     };
     write_app_settings(app, &next)?;
     load_app_settings_view(app)
@@ -181,6 +204,7 @@ pub fn save_stt_settings(
         version: 1,
         stt: merge_stt_settings(Some(existing.stt), input),
         pi: existing.pi,
+        shortcuts: existing.shortcuts,
     };
     write_app_settings(app, &next)?;
     Ok(stt_view_from_stored(&next.stt))
@@ -243,6 +267,11 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
     }
 }
 
+pub fn runtime_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettingsView, String> {
+    let stored = read_or_migrate_settings(app)?;
+    Ok(shortcuts_view_from_stored(&stored.shortcuts))
+}
+
 pub fn stt_test_merged(
     app: &AppHandle,
     input: SttSettingsInput,
@@ -277,6 +306,13 @@ fn pi_view_from_stored(stored: &StoredPiSettings) -> PiSettingsView {
         prompt_template_key: stored.prompt_template_key.clone(),
         custom_prompt_template: stored.custom_prompt_template.clone(),
         provider_json: stored.provider_json.clone(),
+    }
+}
+
+fn shortcuts_view_from_stored(stored: &StoredShortcutSettings) -> ShortcutSettingsView {
+    ShortcutSettingsView {
+        dictation_shortcut: crate::DICTATION_SHORTCUT.to_string(),
+        agent_shortcut: stored.agent_shortcut.clone(),
     }
 }
 
@@ -316,6 +352,16 @@ fn merge_pi_settings(
     }
 }
 
+fn merge_shortcut_settings(
+    existing: Option<StoredShortcutSettings>,
+    input: ShortcutSettingsInput,
+) -> StoredShortcutSettings {
+    let existing = existing.unwrap_or_else(default_shortcuts_settings);
+    StoredShortcutSettings {
+        agent_shortcut: sanitize(&input.agent_shortcut).unwrap_or(existing.agent_shortcut),
+    }
+}
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -343,6 +389,7 @@ fn read_or_migrate_settings(app: &AppHandle) -> Result<StoredAppSettings, String
             version: 1,
             stt: legacy,
             pi: default_pi_settings(),
+            shortcuts: default_shortcuts_settings(),
         };
         write_app_settings(app, &migrated)?;
         return Ok(migrated);
@@ -412,6 +459,7 @@ fn default_app_settings() -> StoredAppSettings {
         version: 1,
         stt: default_stt_settings(),
         pi: default_pi_settings(),
+        shortcuts: default_shortcuts_settings(),
     }
 }
 
@@ -433,6 +481,12 @@ fn default_pi_settings() -> StoredPiSettings {
         prompt_template_key: DEFAULT_PROMPT_TEMPLATE_KEY.to_string(),
         custom_prompt_template: String::new(),
         provider_json: String::new(),
+    }
+}
+
+fn default_shortcuts_settings() -> StoredShortcutSettings {
+    StoredShortcutSettings {
+        agent_shortcut: DEFAULT_AGENT_SHORTCUT.to_string(),
     }
 }
 

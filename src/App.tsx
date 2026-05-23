@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Terminal, useTerminal } from "@wterm/react";
+import "@wterm/react/css";
 
 interface AudioChunk {
   timestamp: number;
@@ -71,7 +73,13 @@ interface PiSettingsView {
 interface AppSettingsView {
   stt: SttSettingsView;
   pi: PiSettingsView;
+  shortcuts: ShortcutSettingsView;
   local_pi: LocalPiConfigView;
+}
+
+interface ShortcutSettingsView {
+  dictation_shortcut: string;
+  agent_shortcut: string;
 }
 
 interface TimingEvent {
@@ -104,6 +112,17 @@ interface AgentTaskUpdatedEvent {
   task: AgentTask;
 }
 
+interface AgentTerminalOutputEvent {
+  task_id: string;
+  data: number[];
+}
+
+interface AgentTerminalStatusEvent {
+  task_id: string;
+  status: string;
+  message: string;
+}
+
 interface AgentSessionEntry {
   line: number;
   timestamp: string;
@@ -124,11 +143,14 @@ interface AgentSessionView {
   parse_errors: string[];
 }
 
-type NavKey = "overview" | "speech" | "pi" | "agent" | "activity";
+type NavKey = "overview" | "shortcuts" | "speech" | "pi" | "agent" | "activity";
 
 const MAX_LOGS = 12;
 const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
 const DEFAULT_AGENT_SHORTCUT = "Cmd+Shift+A";
+const AGENT_TERMINAL_COLS = 104;
+const AGENT_TERMINAL_ROWS = 36;
+const AGENT_TERMINAL_BOTTOM_THRESHOLD = 24;
 const PI_MODES = [
   { value: "dictation-fast", label: "快速整理" },
   { value: "dictation-voice", label: "语音反馈" },
@@ -145,6 +167,7 @@ const PROMPT_TEMPLATES = [
 ];
 const NAV_ITEMS: Array<{ key: NavKey; label: string; meta: string }> = [
   { key: "overview", label: "概览", meta: "总览" },
+  { key: "shortcuts", label: "快捷键", meta: "全局" },
   { key: "speech", label: "语音识别", meta: "识别" },
   { key: "pi", label: "Pi", meta: "模型与映射" },
   { key: "agent", label: "Agent", meta: "任务" },
@@ -173,8 +196,20 @@ const statCardClass = "border-b border-paper-line pb-[18px]";
 const metaCardClass = "border-b border-paper-line pb-[18px]";
 const rowClass =
   "flex items-baseline justify-between gap-4 border-b border-paper-line py-3.5 max-[760px]:flex-col max-[760px]:items-start";
-const sessionEntryClass =
-  "grid gap-2.5 border-b border-paper-line py-4 first:pt-0";
+const shortcutDisplayClass =
+  "min-h-11 border-b border-paper-line pt-2.5 pb-3 text-[1.12rem] font-semibold tracking-[-0.02em]";
+const MODIFIER_CODES = new Set([
+  "AltLeft",
+  "AltRight",
+  "ControlLeft",
+  "ControlRight",
+  "MetaLeft",
+  "MetaRight",
+  "ShiftLeft",
+  "ShiftRight",
+]);
+const SUPPORTED_CODE_PATTERN =
+  /^(Backquote|Backslash|BracketLeft|BracketRight|Pause|Comma|Digit[0-9]|Equal|Key[A-Z]|Minus|Period|Quote|Semicolon|Slash|Backspace|CapsLock|Enter|Space|Tab|Delete|End|Home|Insert|PageDown|PageUp|PrintScreen|ScrollLock|ArrowDown|ArrowLeft|ArrowRight|ArrowUp|NumLock|Numpad[0-9]|NumpadAdd|NumpadDecimal|NumpadDivide|NumpadEnter|NumpadEqual|NumpadMultiply|NumpadSubtract|Escape|F[1-9]|F1[0-9]|F2[0-4])$/;
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -185,17 +220,48 @@ function normalizePiMode(mode: string) {
   return PI_MODES.some((option) => option.value === mode) ? mode : "dictation-fast";
 }
 
-function formatSessionTime(value: string) {
-  if (!value) return "";
-  const numeric = Number(value);
-  const date = Number.isFinite(numeric) && numeric > 1000000000000 ? new Date(numeric) : new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString();
+function shortcutFromKeyboardEvent(event: KeyboardEvent) {
+  if (MODIFIER_CODES.has(event.code)) {
+    return { status: "继续按一个非修饰键。" };
+  }
+
+  if (event.code === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    return { cancelled: true };
+  }
+
+  if (!SUPPORTED_CODE_PATTERN.test(event.code)) {
+    return { status: "这个按键暂不支持，请换一个组合。" };
+  }
+
+  const modifiers: string[] = [];
+  if (event.metaKey) modifiers.push("Cmd");
+  if (event.ctrlKey) modifiers.push("Ctrl");
+  if (event.altKey) modifiers.push("Option");
+  if (event.shiftKey) modifiers.push("Shift");
+
+  if (modifiers.length === 0) {
+    return { status: "至少按住一个修饰键。" };
+  }
+
+  const key = event.code.startsWith("Key") ? event.code.slice(3) : event.code.startsWith("Digit") ? event.code.slice(5) : event.code;
+  return { shortcut: [...modifiers, key].join("+") };
 }
 
-function compactAgentPrompt(text: string) {
-  const match = text.match(/<task>\s*([\s\S]*?)\s*<\/task>/);
-  return (match?.[1] ?? text).trim();
+function statusLabel(status: AgentTask["status"]) {
+  switch (status) {
+    case "pending":
+      return "等待中";
+    case "running":
+      return "执行中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "interrupted":
+      return "已中断";
+    default:
+      return "未知";
+  }
 }
 
 function App() {
@@ -240,14 +306,34 @@ function App() {
     raw_settings_json: "",
     raw_models_json: "",
   });
+  const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettingsView>({
+    dictation_shortcut: DEFAULT_SHORTCUT,
+    agent_shortcut: DEFAULT_AGENT_SHORTCUT,
+  });
+  const [isCapturingAgentShortcut, setIsCapturingAgentShortcut] = useState(false);
+  const [shortcutCaptureStatus, setShortcutCaptureStatus] = useState("保存设置后生效。");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [settingsStatus, setSettingsStatus] = useState("未保存");
   const [isTestingSettings, setIsTestingSettings] = useState(false);
   const [agentSession, setAgentSession] = useState<AgentSessionView | null>(null);
+  const [isAgentTerminalLoading, setIsAgentTerminalLoading] = useState(false);
   const [agentSessionStatus, setAgentSessionStatus] = useState("选择任务后读取本地 session。");
-  const [continueMessage, setContinueMessage] = useState("");
-  const [isContinuingAgent, setIsContinuingAgent] = useState(false);
+  const [agentTerminalStatus, setAgentTerminalStatus] = useState("选择任务后连接终端。");
+  const [activeTerminalTaskId, setActiveTerminalTaskId] = useState("");
+  const [terminalResetKey, setTerminalResetKey] = useState(0);
+  const [isAgentTerminalAtBottom, setIsAgentTerminalAtBottom] = useState(true);
+  const [hasAgentTerminalPendingOutput, setHasAgentTerminalPendingOutput] = useState(false);
+  const [isAgentDetailOpen, setIsAgentDetailOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const terminal = useTerminal();
+  const terminalWriteRef = useRef(terminal.write);
+  const terminalFocusRef = useRef(terminal.focus);
+  const terminalShellRef = useRef<HTMLDivElement | null>(null);
+  const agentTerminalAtBottomRef = useRef(true);
+  const agentTerminalReadyRef = useRef(false);
+  const pendingAgentTerminalOutputRef = useRef<Uint8Array[]>([]);
+  const agentTerminalLoadTimeoutRef = useRef<number | null>(null);
+  const selectedAgentTaskIdRef = useRef("");
 
   const addLog = (message: string) => {
     setLogs((prev) => [...prev.slice(-(MAX_LOGS - 1)), `[${new Date().toLocaleTimeString()}] ${message}`]);
@@ -274,17 +360,155 @@ function App() {
     () => agentTasks.find((task) => task.id === selectedAgentTaskId) ?? agentTasks[0],
     [agentTasks, selectedAgentTaskId],
   );
-  const renderedSessionEntries = useMemo(
-    () =>
-      (agentSession?.entries ?? []).filter(
-        (entry) =>
-          entry.entry_type === "message" ||
-          entry.entry_type === "session_info" ||
-          entry.entry_type === "model_change" ||
-          entry.entry_type === "thinking_level_change",
-      ),
-    [agentSession],
+  const terminalLineCount = agentSession?.entries.length ?? 0;
+  const selectedAgentTaskStatus = selectedAgentTask ? statusLabel(selectedAgentTask.status) : "未选择";
+  const selectedAgentTaskStatusText = selectedAgentTask
+    ? `${selectedAgentTaskStatus} · ${activeTerminalTaskId === selectedAgentTask.id ? agentTerminalStatus : "终端未连接"}`
+    : "选择任务后连接终端。";
+  const shouldShowAgentTerminalJumpButton =
+    Boolean(selectedAgentTask) &&
+    !isAgentTerminalLoading &&
+    (!isAgentTerminalAtBottom || hasAgentTerminalPendingOutput);
+
+  const clearAgentTerminalLoadTimeout = useCallback(() => {
+    if (agentTerminalLoadTimeoutRef.current === null) return;
+    window.clearTimeout(agentTerminalLoadTimeoutRef.current);
+    agentTerminalLoadTimeoutRef.current = null;
+  }, []);
+
+  const beginAgentTerminalLoading = useCallback((waitingMessage: string) => {
+    clearAgentTerminalLoadTimeout();
+    agentTerminalReadyRef.current = false;
+    pendingAgentTerminalOutputRef.current = [];
+    setIsAgentTerminalLoading(true);
+
+    agentTerminalLoadTimeoutRef.current = window.setTimeout(() => {
+      setAgentTerminalStatus(waitingMessage);
+    }, 8000);
+  }, [clearAgentTerminalLoadTimeout]);
+
+  const finishAgentTerminalLoading = useCallback(() => {
+    clearAgentTerminalLoadTimeout();
+    setIsAgentTerminalLoading(false);
+  }, [clearAgentTerminalLoadTimeout]);
+
+  const getAgentTerminalNode = useCallback(
+    () => terminalShellRef.current?.querySelector<HTMLElement>(".agent-terminal.wterm") ?? null,
+    [],
   );
+
+  const isAgentTerminalNearBottom = useCallback(() => {
+    const terminalNode = getAgentTerminalNode();
+    if (!terminalNode) return true;
+    const distanceToBottom =
+      terminalNode.scrollHeight - terminalNode.scrollTop - terminalNode.clientHeight;
+    return distanceToBottom <= AGENT_TERMINAL_BOTTOM_THRESHOLD;
+  }, [getAgentTerminalNode]);
+
+  const syncAgentTerminalScrollState = useCallback(() => {
+    const isAtBottom = isAgentTerminalNearBottom();
+    agentTerminalAtBottomRef.current = isAtBottom;
+    setIsAgentTerminalAtBottom(isAtBottom);
+    if (isAtBottom) {
+      setHasAgentTerminalPendingOutput(false);
+    }
+  }, [isAgentTerminalNearBottom]);
+
+  const resetAgentTerminalView = useCallback(() => {
+    setTerminalResetKey((prev) => prev + 1);
+    agentTerminalReadyRef.current = false;
+    pendingAgentTerminalOutputRef.current = [];
+    agentTerminalAtBottomRef.current = true;
+    setIsAgentTerminalAtBottom(true);
+    setHasAgentTerminalPendingOutput(false);
+    terminalWriteRef.current("\x1b[3J\x1b[H\x1b[2J");
+  }, []);
+
+  const scrollAgentTerminalToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const terminalNode = getAgentTerminalNode();
+        if (!terminalNode) return;
+        terminalNode.scrollTop = terminalNode.scrollHeight;
+        agentTerminalAtBottomRef.current = true;
+        setIsAgentTerminalAtBottom(true);
+        setHasAgentTerminalPendingOutput(false);
+      });
+    });
+  }, [getAgentTerminalNode]);
+
+  const followAgentTerminalIfPinned = useCallback(() => {
+    if (agentTerminalAtBottomRef.current) {
+      scrollAgentTerminalToBottom();
+      return;
+    }
+
+    setHasAgentTerminalPendingOutput(true);
+  }, [scrollAgentTerminalToBottom]);
+
+  const flushPendingAgentTerminalOutput = useCallback(() => {
+    if (!agentTerminalReadyRef.current || pendingAgentTerminalOutputRef.current.length === 0) {
+      return false;
+    }
+
+    for (const chunk of pendingAgentTerminalOutputRef.current) {
+      terminalWriteRef.current(chunk);
+    }
+    pendingAgentTerminalOutputRef.current = [];
+    finishAgentTerminalLoading();
+    scrollAgentTerminalToBottom();
+    return true;
+  }, [finishAgentTerminalLoading, scrollAgentTerminalToBottom]);
+
+  useEffect(() => {
+    selectedAgentTaskIdRef.current = selectedAgentTask?.id ?? "";
+  }, [selectedAgentTask?.id]);
+
+  useEffect(() => {
+    terminalWriteRef.current = terminal.write;
+    terminalFocusRef.current = terminal.focus;
+  }, [terminal.write, terminal.focus]);
+
+  useEffect(() => {
+    if (!isCapturingAgentShortcut) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const result = shortcutFromKeyboardEvent(event);
+      if (result.cancelled) {
+        setIsCapturingAgentShortcut(false);
+        setShortcutCaptureStatus("已取消设置。");
+        return;
+      }
+
+      if (result.shortcut) {
+        setShortcutSettings((prev) => ({ ...prev, agent_shortcut: result.shortcut ?? prev.agent_shortcut }));
+        setIsCapturingAgentShortcut(false);
+        setShortcutCaptureStatus("已捕获，保存设置后生效。");
+        return;
+      }
+
+      setShortcutCaptureStatus(result.status ?? "继续按快捷键。");
+    };
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [isCapturingAgentShortcut]);
+
+  useEffect(() => {
+    if (!isAgentDetailOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsAgentDetailOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isAgentDetailOpen]);
 
   useEffect(() => {
     let unlistenAudio: (() => void) | undefined;
@@ -293,13 +517,19 @@ function App() {
     let unlistenHotkey: (() => void) | undefined;
     let unlistenTiming: (() => void) | undefined;
     let unlistenAgentTask: (() => void) | undefined;
+    let unlistenAgentTerminalOutput: (() => void) | undefined;
+    let unlistenAgentTerminalStatus: (() => void) | undefined;
 
     addLog("Ready");
 
     void invoke<AgentTask[]>("get_agent_tasks")
       .then((tasks) => {
         setAgentTasks(tasks);
-        setSelectedAgentTaskId((prev) => prev || tasks[0]?.id || "");
+        setSelectedAgentTaskId((prev) => {
+          const next = prev || tasks[0]?.id || "";
+          selectedAgentTaskIdRef.current = next;
+          return next;
+        });
       })
       .catch((error) => addLog(`Load agent tasks failed: ${getErrorMessage(error)}`));
 
@@ -307,6 +537,7 @@ function App() {
       .then((settings) => {
         setSttSettings(settings.stt);
         setPiSettings({ ...settings.pi, mode: normalizePiMode(settings.pi.mode) });
+        setShortcutSettings(settings.shortcuts);
         setLocalPi(settings.local_pi);
         setSettingsStatus(settings.stt.has_api_key ? "已保存到本地" : "未配置 API Key");
       })
@@ -361,51 +592,131 @@ function App() {
         const rest = prev.filter((item) => item.id !== task.id);
         return [task, ...rest].sort((a, b) => b.created_at_ms - a.created_at_ms);
       });
-      setSelectedAgentTaskId((prev) => prev || task.id);
+      setSelectedAgentTaskId((prev) => {
+        if (prev) return prev;
+        selectedAgentTaskIdRef.current = task.id;
+        return task.id;
+      });
       addLog(`Agent ${task.status}: ${task.title}`);
     }).then((dispose) => {
       unlistenAgentTask = dispose;
     });
 
+    void listen<AgentTerminalOutputEvent>("agent-terminal-output", (event) => {
+      const { task_id, data } = event.payload;
+      if (task_id !== selectedAgentTaskIdRef.current) return;
+      const shouldFollowOutput = agentTerminalAtBottomRef.current;
+      const chunk = new Uint8Array(data);
+      if (agentTerminalReadyRef.current) {
+        terminalWriteRef.current(chunk);
+        finishAgentTerminalLoading();
+      } else {
+        pendingAgentTerminalOutputRef.current.push(chunk);
+      }
+      if (shouldFollowOutput) {
+        scrollAgentTerminalToBottom();
+      } else {
+        setHasAgentTerminalPendingOutput(true);
+      }
+    }).then((dispose) => {
+      unlistenAgentTerminalOutput = dispose;
+    });
+
+    void listen<AgentTerminalStatusEvent>("agent-terminal-status", (event) => {
+      const { task_id, status, message } = event.payload;
+      if (task_id !== selectedAgentTaskIdRef.current) return;
+      setAgentTerminalStatus(message || status);
+    }).then((dispose) => {
+      unlistenAgentTerminalStatus = dispose;
+    });
+
     return () => {
+      clearAgentTerminalLoadTimeout();
       unlistenAudio?.();
       unlistenStt?.();
       unlistenStatus?.();
       unlistenHotkey?.();
       unlistenTiming?.();
       unlistenAgentTask?.();
+      unlistenAgentTerminalOutput?.();
+      unlistenAgentTerminalStatus?.();
     };
-  }, []);
+  }, [clearAgentTerminalLoadTimeout, finishAgentTerminalLoading, scrollAgentTerminalToBottom]);
 
   useEffect(() => {
+    if (activeNav !== "agent") {
+      finishAgentTerminalLoading();
+      setActiveTerminalTaskId("");
+      setAgentTerminalStatus("切换到 Agent 后连接终端。");
+      return;
+    }
+
     if (!selectedAgentTask?.id) {
       setAgentSession(null);
+      finishAgentTerminalLoading();
       setAgentSessionStatus("选择任务后读取本地 session。");
+      setAgentTerminalStatus("选择任务后连接终端。");
+      setActiveTerminalTaskId("");
+      resetAgentTerminalView();
       return;
     }
 
     let cancelled = false;
+    const taskId = selectedAgentTask.id;
+    setAgentSession(null);
     setAgentSessionStatus("正在读取 session...");
-    void invoke<AgentSessionView>("get_agent_session", { taskId: selectedAgentTask.id })
+    setAgentTerminalStatus("正在连接 PTY...");
+    setActiveTerminalTaskId(taskId);
+    resetAgentTerminalView();
+    beginAgentTerminalLoading("PTY 已连接，正在等待终端输出...");
+
+    void invoke<void>("start_agent_terminal", {
+      taskId,
+      cols: AGENT_TERMINAL_COLS,
+      rows: AGENT_TERMINAL_ROWS,
+    })
+      .then(() => {
+        if (cancelled) return;
+        setAgentTerminalStatus("PTY 已连接。");
+        terminalFocusRef.current();
+        scrollAgentTerminalToBottom();
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        finishAgentTerminalLoading();
+        setAgentTerminalStatus(`PTY 连接失败：${getErrorMessage(error)}`);
+      });
+
+    void invoke<AgentSessionView>("get_agent_session", { taskId })
       .then((session) => {
         if (cancelled) return;
         setAgentSession(session);
         setAgentSessionStatus(
           session.entries.length > 0
-            ? `已渲染 ${session.entries.length} 条 JSONL 记录。`
+            ? `已读取 ${session.entries.length} 条 JSONL 记录。`
             : "这个 session 文件还没有可渲染内容。",
         );
+        scrollAgentTerminalToBottom();
       })
       .catch((error) => {
         if (cancelled) return;
         setAgentSession(null);
+        finishAgentTerminalLoading();
         setAgentSessionStatus(`读取 session 失败：${getErrorMessage(error)}`);
       });
 
     return () => {
       cancelled = true;
+      void invoke("stop_agent_terminal", { taskId });
     };
-  }, [selectedAgentTask?.id, selectedAgentTask?.updated_at_ms]);
+  }, [
+    activeNav,
+    beginAgentTerminalLoading,
+    finishAgentTerminalLoading,
+    resetAgentTerminalView,
+    scrollAgentTerminalToBottom,
+    selectedAgentTask?.id,
+  ]);
 
   const startRecording = async () => {
     try {
@@ -460,10 +771,16 @@ function App() {
             custom_prompt_template: piSettings.custom_prompt_template,
             provider_json: piSettings.provider_json,
           },
+          shortcuts: {
+            agent_shortcut: shortcutSettings.agent_shortcut,
+          },
         },
       });
       setSttSettings(saved.stt);
       setPiSettings({ ...saved.pi, mode: normalizePiMode(saved.pi.mode) });
+      setShortcutSettings(saved.shortcuts);
+      setIsCapturingAgentShortcut(false);
+      setShortcutCaptureStatus("快捷键已保存并生效。");
       setLocalPi(saved.local_pi);
       setApiKeyInput("");
       setSettingsStatus("已保存到本地");
@@ -501,42 +818,38 @@ function App() {
   const refreshAgentSession = async () => {
     if (!selectedAgentTask) return;
 
+    const taskId = selectedAgentTask.id;
+    setAgentSession(null);
     setAgentSessionStatus("正在刷新 session...");
+    setAgentTerminalStatus("正在重新连接 PTY...");
+    setActiveTerminalTaskId(taskId);
+    resetAgentTerminalView();
+    beginAgentTerminalLoading("PTY 已连接，正在等待终端输出...");
     try {
-      const session = await invoke<AgentSessionView>("get_agent_session", { taskId: selectedAgentTask.id });
+      await invoke<void>("start_agent_terminal", {
+        taskId,
+        cols: AGENT_TERMINAL_COLS,
+        rows: AGENT_TERMINAL_ROWS,
+      });
+      if (selectedAgentTaskIdRef.current !== taskId) return;
+      setAgentTerminalStatus("PTY 已连接。");
+      terminalFocusRef.current();
+      scrollAgentTerminalToBottom();
+
+      const session = await invoke<AgentSessionView>("get_agent_session", { taskId });
+      if (selectedAgentTaskIdRef.current !== taskId) return;
       setAgentSession(session);
       setAgentSessionStatus(
         session.entries.length > 0
-          ? `已渲染 ${session.entries.length} 条 JSONL 记录。`
+          ? `已读取 ${session.entries.length} 条 JSONL 记录。`
           : "这个 session 文件还没有可渲染内容。",
       );
+      scrollAgentTerminalToBottom();
     } catch (error) {
+      if (selectedAgentTaskIdRef.current !== taskId) return;
+      finishAgentTerminalLoading();
       setAgentSessionStatus(`刷新 session 失败：${getErrorMessage(error)}`);
-    }
-  };
-
-  const submitAgentContinue = async () => {
-    if (!selectedAgentTask) return;
-
-    const message = continueMessage.trim();
-    if (!message) {
-      setAgentSessionStatus("继续内容不能为空。");
-      return;
-    }
-
-    setIsContinuingAgent(true);
-    setAgentSessionStatus("正在继续会话...");
-    try {
-      await invoke<string>("continue_agent_task", {
-        taskId: selectedAgentTask.id,
-        message,
-      });
-      setContinueMessage("");
-      await refreshAgentSession();
-    } catch (error) {
-      setAgentSessionStatus(`继续会话失败：${getErrorMessage(error)}`);
-    } finally {
-      setIsContinuingAgent(false);
+      setAgentTerminalStatus(`PTY 连接失败：${getErrorMessage(error)}`);
     }
   };
 
@@ -597,22 +910,6 @@ function App() {
   const statusTone = hotkeyStatus.state === "recording" ? "recording" : "idle";
   const formatTaskTime = (timestamp: number) =>
     timestamp ? new Date(timestamp).toLocaleString() : "未知时间";
-  const statusLabel = (status: AgentTask["status"]) => {
-    switch (status) {
-      case "pending":
-        return "等待中";
-      case "running":
-        return "执行中";
-      case "completed":
-        return "已完成";
-      case "failed":
-        return "失败";
-      case "interrupted":
-        return "已中断";
-      default:
-        return "未知";
-    }
-  };
 
   return (
     <main className="grid h-screen grid-cols-[248px_minmax(0,1fr)] bg-paper-surface max-[760px]:grid-cols-[220px_minmax(0,1fr)]">
@@ -643,7 +940,13 @@ function App() {
                   ? "bg-[color-mix(in_oklch,var(--color-paper-surface-soft)_92%,var(--color-paper-accent)_8%)]"
                   : "",
               ].join(" ")}
-              onClick={() => setActiveNav(item.key)}
+              onClick={() => {
+                if (item.key === "agent" && activeNav === "agent") {
+                  void refreshAgentSession();
+                  return;
+                }
+                setActiveNav(item.key);
+              }}
             >
               <span className="text-[0.95rem] font-semibold">{item.label}</span>
               <small className="text-paper-muted">{item.meta}</small>
@@ -661,17 +964,25 @@ function App() {
             ].join(" ")}
           />
           <div>
-            <strong className="block text-[0.95rem] font-semibold">{hotkeyStatus.shortcut}</strong>
+            <strong className="block text-[0.95rem] font-semibold">快捷键</strong>
             <p className="mt-1 text-paper-muted [line-height:1.45]">
-              {hotkeyStatus.purpose === "agent" ? "Agent · " : "Dictation · "}
-              {hotkeyStatus.message}
+              听写 {shortcutSettings.dictation_shortcut || DEFAULT_SHORTCUT}
+              <br />
+              Agent {shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT}
             </p>
           </div>
         </div>
       </aside>
 
-      <section className="h-screen overflow-x-hidden overflow-y-auto bg-paper-surface px-[42px] pb-[52px] [scrollbar-gutter:stable] max-[760px]:px-[22px] max-[760px]:pb-10">
-        <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-paper-line bg-[color-mix(in_oklch,var(--color-paper-surface)_94%,white_6%)] py-[18px] pt-7 max-[760px]:flex-col max-[760px]:items-start">
+      <section
+        className={[
+          "flex h-screen flex-col overflow-x-hidden bg-paper-surface px-[42px] max-[760px]:px-[22px]",
+          activeNav === "agent"
+            ? "overflow-hidden pb-0"
+            : "overflow-y-auto pb-[52px] [scrollbar-gutter:stable] max-[760px]:pb-10",
+        ].join(" ")}
+      >
+        <header className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 border-b border-paper-line bg-[color-mix(in_oklch,var(--color-paper-surface)_94%,white_6%)] py-[18px] pt-7 max-[760px]:flex-col max-[760px]:items-start">
           <div>
             <p className={kickerClass}>设置</p>
             <h2 className="mt-1.5 text-[clamp(1.6rem,1.9vw,2.1rem)] font-semibold tracking-[-0.06em]">
@@ -765,6 +1076,84 @@ function App() {
                     {piSettings.reuse_process ? "已开启" : "已关闭"}
                   </strong>
                 </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeNav === "shortcuts" && (
+          <div className="grid gap-[34px] pt-7">
+            <section className={sectionClass}>
+              <div className={sectionHeadClass}>
+                <div>
+                  <h3 className={sectionTitleClass}>全局快捷键</h3>
+                  <p className={`mt-1.5 ${mutedClass}`}>Agent 任务入口。</p>
+                </div>
+              </div>
+
+              <div className={formGridClass}>
+                <label className={fieldClass}>
+                  <span className={fieldLabelClass}>听写快捷键</span>
+                  <span className={shortcutDisplayClass}>{shortcutSettings.dictation_shortcut || DEFAULT_SHORTCUT}</span>
+                  <small className={mutedClass}>当前版本固定为听写入口。</small>
+                </label>
+
+                <div className={fieldClass}>
+                  <span className={fieldLabelClass}>Agent 快捷键</span>
+                  <button
+                    className={[
+                      "min-h-11 border-b px-0 pt-2.5 pb-3 text-left text-[1.12rem] font-semibold tracking-[-0.02em] transition duration-150",
+                      isCapturingAgentShortcut
+                        ? "border-paper-accent text-paper-accent"
+                        : "border-paper-line text-paper-ink hover:border-paper-accent",
+                    ].join(" ")}
+                    type="button"
+                    onClick={() => {
+                      setIsCapturingAgentShortcut(true);
+                      setShortcutCaptureStatus("请按下新的 Agent 快捷键，Esc 取消。");
+                    }}
+                  >
+                    {isCapturingAgentShortcut
+                      ? "正在等待按键..."
+                      : shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT}
+                  </button>
+                  <small className={mutedClass}>{shortcutCaptureStatus}</small>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-2.5">
+                <button
+                  type="button"
+                  className={primaryButtonClass}
+                  onClick={() => {
+                    setIsCapturingAgentShortcut(true);
+                    setShortcutCaptureStatus("请按下新的 Agent 快捷键，Esc 取消。");
+                  }}
+                >
+                  {isCapturingAgentShortcut ? "等待按键" : "开始设置"}
+                </button>
+                <button
+                  type="button"
+                  className={ghostButtonClass}
+                  onClick={() => {
+                    setIsCapturingAgentShortcut(false);
+                    setShortcutCaptureStatus("已取消设置。");
+                  }}
+                  disabled={!isCapturingAgentShortcut}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={ghostButtonClass}
+                  onClick={() => {
+                    setIsCapturingAgentShortcut(false);
+                    setShortcutSettings((prev) => ({ ...prev, agent_shortcut: DEFAULT_AGENT_SHORTCUT }));
+                    setShortcutCaptureStatus("已恢复默认，保存设置后生效。");
+                  }}
+                >
+                  恢复默认
+                </button>
               </div>
             </section>
           </div>
@@ -1093,184 +1482,235 @@ function App() {
         )}
 
         {activeNav === "agent" && (
-          <div className="grid gap-[34px] pt-7">
-            <section className="grid grid-cols-[minmax(250px,0.52fr)_minmax(0,1.48fr)] gap-8 max-[960px]:grid-cols-1">
-              <div className={sectionClass}>
+          <div className="grid min-h-0 flex-1 gap-[24px] pt-7 pb-7">
+            <section className="grid h-full min-h-0 grid-cols-[minmax(250px,0.36fr)_minmax(0,1fr)] gap-8 max-[960px]:grid-cols-1 max-[960px]:grid-rows-[minmax(128px,0.34fr)_minmax(280px,1fr)]">
+              <div className="flex min-h-0 flex-col border-b border-paper-line pb-7">
                 <div className={sectionHeadClass}>
                   <div>
                     <h3 className={sectionTitleClass}>Agent 任务</h3>
-                    <p className={`mt-1.5 ${mutedClass}`}>按 {DEFAULT_AGENT_SHORTCUT} 录音创建后台任务。</p>
+                    <p className={`mt-1.5 ${mutedClass}`}>
+                      {agentTasks.length ? `${agentTasks.length} 个任务` : `按 ${shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT} 创建任务`}
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid gap-3">
-                  {agentTasks.length === 0 && <div className="text-paper-muted">暂无 Agent 任务。</div>}
+                <div className="grid min-h-0 flex-1 content-start gap-2 overflow-auto pr-1">
+                  {agentTasks.length === 0 && (
+                    <div className="border-b border-paper-line py-4 text-paper-muted">暂无 Agent 任务。</div>
+                  )}
                   {agentTasks.map((task) => (
                     <button
                       key={task.id}
                       type="button"
                       className={[
-                        "grid w-full gap-2 border-b border-paper-line bg-transparent py-4 text-left transition duration-150 hover:-translate-y-px",
+                        "grid w-full gap-2 border-b border-paper-line bg-transparent py-3.5 text-left transition duration-150 hover:text-paper-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper-accent",
                         selectedAgentTask?.id === task.id ? "text-paper-accent" : "",
                       ].join(" ")}
-                      onClick={() => setSelectedAgentTaskId(task.id)}
+                      onClick={() => {
+                        selectedAgentTaskIdRef.current = task.id;
+                        setSelectedAgentTaskId(task.id);
+                      }}
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <strong className="break-words text-base font-semibold [line-height:1.35]">{task.title}</strong>
-                        <span className="shrink-0 text-[0.78rem] text-paper-muted">{statusLabel(task.status)}</span>
+                        <strong className="min-w-0 break-words text-[0.95rem] font-semibold [line-height:1.35]">{task.title}</strong>
+                        <span className="shrink-0 text-[0.75rem] text-paper-muted">{statusLabel(task.status)}</span>
                       </div>
-                      <small className="text-paper-muted">{formatTaskTime(task.created_at_ms)}</small>
+                      <small className="text-[0.75rem] text-paper-muted">{formatTaskTime(task.created_at_ms)}</small>
                     </button>
                   ))}
                 </div>
               </div>
 
-              <div className={sectionClass}>
+              <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-paper-line pb-7">
                 <div className={`${sectionHeadClass} max-[760px]:flex-col max-[760px]:items-start`}>
-                  <div>
-                    <h3 className={sectionTitleClass}>会话</h3>
-                    <p className={`mt-1.5 ${mutedClass}`}>{agentSessionStatus}</p>
+                  <div className="min-w-0">
+                    <h3 className="max-w-[72ch] truncate text-base font-semibold tracking-[-0.03em]">
+                      {selectedAgentTask?.title || "会话"}
+                    </h3>
+                    <p className={`mt-1.5 ${mutedClass}`}>{selectedAgentTaskStatusText}</p>
                   </div>
                   <div className="flex flex-wrap gap-2.5">
                     <button className={ghostButtonClass} type="button" onClick={refreshAgentSession} disabled={!selectedAgentTask}>
                       刷新
                     </button>
-                    <button className={ghostButtonClass} type="button" onClick={copyResumeCommand} disabled={!agentSession?.resume_command}>
-                      复制恢复指令
+                    <button className={ghostButtonClass} type="button" onClick={() => setIsAgentDetailOpen(true)} disabled={!selectedAgentTask}>
+                      详情
                     </button>
                   </div>
                 </div>
 
                 {!selectedAgentTask && <div className="text-paper-muted">选择一个任务查看会话。</div>}
                 {selectedAgentTask && (
-                  <div className="grid gap-7">
-                    <div className="grid grid-cols-3 gap-5 max-[900px]:grid-cols-1">
-                      <article className={metaCardClass}>
-                        <span className={fieldLabelClass}>状态</span>
-                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
-                          {statusLabel(selectedAgentTask.status)}
-                        </strong>
-                      </article>
-                      <article className={metaCardClass}>
-                        <span className={fieldLabelClass}>会话记录</span>
-                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
-                          {agentSession?.entries.length ?? 0}
-                        </strong>
-                      </article>
-                      <article className={metaCardClass}>
-                        <span className={fieldLabelClass}>执行事件</span>
-                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
-                          {selectedAgentTask.events.length}
-                        </strong>
-                      </article>
-                    </div>
-
-                    <section>
-                      <div className="mb-3 flex items-end justify-between gap-4 max-[760px]:flex-col max-[760px]:items-start">
-                        <div>
-                          <span className={fieldLabelClass}>渲染结果</span>
-                          <p className={`mt-1.5 ${mutedClass}`}>从本地 JSONL 读取，不走外部 Web UI。</p>
+                  <div ref={terminalShellRef} className="relative min-h-0 flex-1 overflow-hidden">
+                    <Terminal
+                      key={`${selectedAgentTask.id}-${terminalResetKey}`}
+                      ref={terminal.ref}
+                      className="agent-terminal"
+                      cols={AGENT_TERMINAL_COLS}
+                      rows={AGENT_TERMINAL_ROWS}
+                      cursorBlink
+                      onData={(data) => {
+                        if (!selectedAgentTask?.id) return;
+                        void invoke("write_agent_terminal", {
+                          taskId: selectedAgentTask.id,
+                          data,
+                        }).catch((error) => {
+                          setAgentTerminalStatus(`写入失败：${getErrorMessage(error)}`);
+                        });
+                        followAgentTerminalIfPinned();
+                      }}
+                      onResize={(cols, rows) => {
+                        if (!selectedAgentTask?.id) return;
+                        void invoke("resize_agent_terminal", {
+                          taskId: selectedAgentTask.id,
+                          cols,
+                          rows,
+                        }).catch((error) => {
+                          setAgentTerminalStatus(`调整终端尺寸失败：${getErrorMessage(error)}`);
+                        });
+                        followAgentTerminalIfPinned();
+                      }}
+                      onReady={() => {
+                        agentTerminalReadyRef.current = true;
+                        flushPendingAgentTerminalOutput();
+                        terminalFocusRef.current();
+                        scrollAgentTerminalToBottom();
+                      }}
+                      onScroll={syncAgentTerminalScrollState}
+                      onError={(error) => {
+                        finishAgentTerminalLoading();
+                        setAgentTerminalStatus(`终端初始化失败：${getErrorMessage(error)}`);
+                      }}
+                    />
+                    {isAgentTerminalLoading && (
+                      <div
+                        className="absolute inset-px z-10 grid place-items-center bg-[color-mix(in_oklch,var(--color-paper-surface)_72%,transparent)]"
+                        role="status"
+                        aria-live="polite"
+                        aria-label="正在加载 Agent 会话"
+                      >
+                        <div className="agent-loading-wave" aria-hidden="true">
+                          {Array.from({ length: 9 }, (_, index) => (
+                            <span key={index} />
+                          ))}
                         </div>
-                        {agentSession?.parse_errors.length ? (
-                          <span className="text-[0.78rem] text-[oklch(0.56_0.2_28)]">
-                            {agentSession.parse_errors.length} 条解析失败
-                          </span>
-                        ) : null}
                       </div>
-
-                      <div className="max-h-[560px] overflow-auto border-y border-paper-line py-4 pr-2 [scrollbar-gutter:stable]">
-                        {renderedSessionEntries.length === 0 && (
-                          <div className="py-8 text-paper-muted">还没有可渲染的对话内容。</div>
+                    )}
+                    {shouldShowAgentTerminalJumpButton && (
+                      <button
+                        type="button"
+                        aria-label={hasAgentTerminalPendingOutput ? "有新输出，滚动到底部" : "滚动到底部"}
+                        className="absolute bottom-6 left-1/2 z-10 grid h-10 w-10 -translate-x-1/2 place-items-center rounded-full border border-paper-line bg-paper-surface text-lg font-semibold text-paper-accent shadow-[0_12px_32px_color-mix(in_oklch,var(--color-paper-ink)_14%,transparent)] transition-[opacity,transform] duration-150 hover:-translate-y-0.5 active:scale-[0.96]"
+                        onClick={scrollAgentTerminalToBottom}
+                      >
+                        <span aria-hidden="true" className="leading-none">↓</span>
+                        {hasAgentTerminalPendingOutput && (
+                          <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-paper-accent" />
                         )}
-                        {renderedSessionEntries.map((entry) => {
-                          const displayText = entry.role === "user" ? compactAgentPrompt(entry.text) : entry.text;
-                          const roleClass =
-                            entry.role === "assistant"
-                              ? "text-paper-ink"
-                              : entry.role === "user"
-                                ? "text-paper-accent"
-                                : entry.is_error
-                                  ? "text-[oklch(0.56_0.2_28)]"
-                                  : "text-paper-muted";
-                          return (
-                            <article key={`${entry.line}-${entry.entry_type}`} className={sessionEntryClass}>
-                              <div className="flex items-baseline justify-between gap-4">
-                                <div className="flex flex-wrap items-baseline gap-2">
-                                  <strong className={["text-[0.95rem] font-semibold", roleClass].join(" ")}>
-                                    {entry.tool_name ? `${entry.title} · ${entry.tool_name}` : entry.title}
-                                  </strong>
-                                  <span className="font-mono text-[0.72rem] text-paper-muted">L{entry.line}</span>
-                                </div>
-                                {entry.timestamp && (
-                                  <span className="shrink-0 text-[0.76rem] text-paper-muted">
-                                    {formatSessionTime(entry.timestamp)}
-                                  </span>
-                                )}
-                              </div>
-                              <pre className="whitespace-pre-wrap break-words font-inherit text-[0.92rem] [line-height:1.7]">
-                                {displayText}
-                              </pre>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </section>
-
-                    <section>
-                      <span className={fieldLabelClass}>继续会话</span>
-                      <textarea
-                        className={`${textareaClass} mt-3 min-h-[118px] font-inherit`}
-                        value={continueMessage}
-                        onChange={(event) => setContinueMessage(event.target.value)}
-                        placeholder="给这个 Agent session 追加下一条指令..."
-                        disabled={selectedAgentTask.status === "running" || isContinuingAgent}
-                      />
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                        <small className={mutedClass}>
-                          使用同一个 session 文件继续：{selectedAgentTask.session_path}
-                        </small>
-                        <button
-                          className={primaryButtonClass}
-                          type="button"
-                          onClick={submitAgentContinue}
-                          disabled={selectedAgentTask.status === "running" || isContinuingAgent || !continueMessage.trim()}
-                        >
-                          {isContinuingAgent ? "发送中..." : "发送继续指令"}
-                        </button>
-                      </div>
-                    </section>
-
-                    <section className="grid gap-3">
-                      <span className={fieldLabelClass}>恢复指令</span>
-                      <code className="block break-all border-b border-paper-line pb-4 font-mono text-[0.82rem] text-paper-muted">
-                        {agentSession?.resume_command || "pi --session <session-path>"}
-                      </code>
-                    </section>
-
-                    <details>
-                      <summary className="cursor-pointer text-[0.86rem] font-semibold text-paper-muted">执行日志</summary>
-                      <div className="mt-3 max-h-56 overflow-auto border-y border-paper-line py-3 font-mono text-[0.82rem] [line-height:1.65]">
-                        {selectedAgentTask.events.map((event, index) => (
-                          <div key={`${event.timestamp_ms}-${event.kind}-${index}`} className="mt-2 first:mt-0">
-                            <span className="text-paper-muted">{new Date(event.timestamp_ms).toLocaleTimeString()}</span>{" "}
-                            <strong>{event.kind}</strong> · {event.message}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-
-                    {selectedAgentTask.error_text && (
-                      <section>
-                        <span className={fieldLabelClass}>错误</span>
-                        <div className="mt-3 whitespace-pre-wrap border-b border-paper-line pb-4 text-[oklch(0.56_0.2_28)] [line-height:1.7]">
-                          {selectedAgentTask.error_text}
-                        </div>
-                      </section>
+                      </button>
                     )}
                   </div>
                 )}
               </div>
             </section>
+
+            {isAgentDetailOpen && selectedAgentTask && (
+              <div
+                className="fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_oklch,var(--color-paper-ink)_16%,transparent)] px-5 py-6"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) setIsAgentDetailOpen(false);
+                }}
+              >
+                <section
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="agent-detail-title"
+                  className="max-h-[min(760px,calc(100vh-48px))] w-[min(900px,calc(100vw-40px))] overflow-auto border border-paper-line bg-paper-surface px-6 py-5 shadow-[0_24px_80px_color-mix(in_oklch,var(--color-paper-ink)_18%,transparent)]"
+                >
+                  <div className="flex items-start justify-between gap-5 border-b border-paper-line pb-4">
+                    <div className="min-w-0">
+                      <h3 id="agent-detail-title" className="truncate text-base font-semibold tracking-[-0.03em]">
+                        {selectedAgentTask.title}
+                      </h3>
+                      <p className={`mt-1.5 ${mutedClass}`}>{agentSessionStatus}</p>
+                    </div>
+                    <button className={ghostButtonClass} type="button" onClick={() => setIsAgentDetailOpen(false)}>
+                      关闭
+                    </button>
+                  </div>
+
+                  <div className="grid gap-7 py-5">
+                    <div className="grid grid-cols-3 gap-5 max-[760px]:grid-cols-1">
+                      <div className={metaCardClass}>
+                        <span className={fieldLabelClass}>状态</span>
+                        <strong className="mt-2 block text-[0.95rem] font-semibold">{selectedAgentTaskStatus}</strong>
+                      </div>
+                      <div className={metaCardClass}>
+                        <span className={fieldLabelClass}>JSONL</span>
+                        <strong className="mt-2 block text-[0.95rem] font-semibold">{terminalLineCount}</strong>
+                      </div>
+                      <div className={metaCardClass}>
+                        <span className={fieldLabelClass}>事件</span>
+                        <strong className="mt-2 block text-[0.95rem] font-semibold">{selectedAgentTask.events.length}</strong>
+                      </div>
+                    </div>
+
+                    <section className="border-b border-paper-line pb-5">
+                      <div className="mb-3 flex items-center justify-between gap-4">
+                        <span className={fieldLabelClass}>恢复指令</span>
+                        <button className={ghostButtonClass} type="button" onClick={copyResumeCommand} disabled={!agentSession?.resume_command}>
+                          复制
+                        </button>
+                      </div>
+                      <code className="block break-all font-mono text-[0.8rem] text-paper-muted [line-height:1.6]">
+                        {agentSession?.resume_command || "pi --session <session-path>"}
+                      </code>
+                    </section>
+
+                    <section className="border-b border-paper-line pb-5">
+                      <span className={fieldLabelClass}>任务输入</span>
+                      <p className="mt-3 whitespace-pre-wrap text-[0.9rem] text-paper-muted [line-height:1.65]">
+                        {selectedAgentTask.transcript}
+                      </p>
+                    </section>
+
+                    <section className="border-b border-paper-line pb-5">
+                      <span className={fieldLabelClass}>执行日志</span>
+                      <div className="mt-3 max-h-64 overflow-auto font-mono text-[0.78rem] text-paper-muted [line-height:1.6]">
+                        {selectedAgentTask.events.length === 0 && <div>暂无事件。</div>}
+                        {selectedAgentTask.events.map((event, index) => (
+                          <div key={`${event.timestamp_ms}-${event.kind}-${index}`} className="border-b border-paper-line py-2 first:pt-0">
+                            <span>{new Date(event.timestamp_ms).toLocaleTimeString()}</span>{" "}
+                            <strong>{event.kind}</strong> · {event.message}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {agentSession?.parse_errors.length ? (
+                      <section className="border-b border-paper-line pb-5">
+                        <span className={fieldLabelClass}>解析失败</span>
+                        <div className="mt-3 grid gap-2 font-mono text-[0.78rem] text-[oklch(0.56_0.2_28)]">
+                          {agentSession.parse_errors.map((error, index) => (
+                            <div key={`${error}-${index}`}>{error}</div>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {selectedAgentTask.error_text && (
+                      <section className="border-b border-paper-line pb-5">
+                        <span className={fieldLabelClass}>错误</span>
+                        <div className="mt-3 whitespace-pre-wrap text-[0.86rem] text-[oklch(0.56_0.2_28)] [line-height:1.65]">
+                          {selectedAgentTask.error_text}
+                        </div>
+                      </section>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
           </div>
         )}
 
