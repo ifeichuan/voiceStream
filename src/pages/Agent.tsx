@@ -370,43 +370,43 @@ export default function Agent() {
   };
 
   return (
-    <div className="grid min-h-0 flex-1 gap-[24px] pt-7 pb-7">
-      <section className="grid h-full min-h-0 grid-cols-[minmax(250px,0.36fr)_minmax(0,1fr)] gap-8 max-[960px]:grid-cols-1 max-[960px]:grid-rows-[minmax(128px,0.34fr)_minmax(280px,1fr)]">
-        <div className="flex min-h-0 flex-col border-b border-paper-line pb-7">
-          <div className="section-head">
-            <div>
-              <h3 className="section-title">Agent 任务</h3>
-              <p className="mt-1.5 text-paper-muted">
-                {agentTasks.length
-                  ? `${agentTasks.length} 个任务`
-                  : `按 ${shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT} 创建任务`}
-              </p>
-            </div>
+    <div className="grid min-h-0 flex-1 gap-[24px]  ">
+      <section className="grid h-full min-h-0 grid-cols-[minmax(250px,0.36fr)_minmax(0,1fr)] gap-8 max-[960px]:grid-cols-1 max-[960px]:grid-rows-[1fr]">
+        <div className="flex min-h-0 flex-col max-[960px]:hidden">
+          <div className="mb-3 px-2">
+            <h3 className="text-[0.82rem] font-semibold tracking-[-0.02em]">Agent 任务</h3>
+            <p className="mt-1 text-[0.75rem] text-paper-muted">
+              {agentTasks.length
+                ? `${agentTasks.length} 个任务`
+                : `按 ${shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT} 创建任务`}
+            </p>
           </div>
 
-          <div className="grid min-h-0 flex-1 content-start gap-2 overflow-auto pr-1">
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto">
             {agentTasks.length === 0 && (
-              <div className="border-b border-paper-line py-4 text-paper-muted">暂无 Agent 任务。</div>
+              <div className="px-2 py-3 text-[0.82rem] text-paper-muted">暂无 Agent 任务。</div>
             )}
             {agentTasks.map((task) => (
               <button
                 key={task.id}
                 type="button"
                 className={[
-                  "grid w-full gap-2 border-b border-paper-line bg-transparent py-3.5 text-left transition duration-150 hover:text-paper-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper-accent",
-                  selectedAgentTask?.id === task.id ? "text-paper-accent" : "",
+                  "grid w-full gap-1 rounded px-2 py-2 text-left transition-[background-color,color] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper-accent",
+                  selectedAgentTask?.id === task.id
+                    ? "bg-paper-ink/[0.06] text-paper-ink"
+                    : "text-paper-ink/80 hover:bg-paper-ink/[0.03]",
                 ].join(" ")}
                 onClick={() => setSelectedAgentTaskId(task.id)}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <strong className="min-w-0 break-words text-[0.95rem] font-semibold [line-height:1.35]">
+                  <strong className="min-w-0 truncate text-[0.84rem] font-medium [line-height:1.4]">
                     {task.title}
                   </strong>
-                  <span className="shrink-0 text-[0.75rem] text-paper-muted">
+                  <span className="shrink-0 text-[0.72rem] text-paper-muted">
                     {statusLabel(task.status)}
                   </span>
                 </div>
-                <small className="text-[0.75rem] text-paper-muted">
+                <small className="text-[0.72rem] text-paper-muted">
                   {formatTaskTime(task.created_at_ms)}
                 </small>
               </button>
@@ -414,7 +414,7 @@ export default function Agent() {
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-paper-line pb-7">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-paper-line ">
           <div className="section-head max-[760px]:flex-col max-[760px]:items-start">
             <div className="min-w-0">
               <h3 className="max-w-[72ch] truncate text-base font-semibold tracking-[-0.03em]">
