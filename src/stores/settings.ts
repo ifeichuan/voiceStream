@@ -5,6 +5,7 @@ import { getErrorMessage, normalizePiMode } from "../lib/utils";
 import { useLogsStore } from "./logs";
 import type {
   SttSettingsView,
+  SttProviderMeta,
   PiSettingsView,
   ShortcutSettingsView,
   LocalPiConfigView,
@@ -13,6 +14,7 @@ import type {
 
 interface SettingsState {
   sttSettings: SttSettingsView;
+  sttProviders: SttProviderMeta[];
   piSettings: PiSettingsView;
   shortcutSettings: ShortcutSettingsView;
   localPi: LocalPiConfigView;
@@ -38,9 +40,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     api_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
     model: "fun-asr-realtime",
     workspace_id: "",
+    language: "",
+    sample_rate: 16000,
+    extra_config: "",
     has_api_key: false,
     api_key_hint: "",
   },
+  sttProviders: [],
   piSettings: {
     mode: "dictation-fast",
     provider: "",
@@ -77,9 +83,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     const addLog = useLogsStore.getState().addLog;
     try {
-      const settings = await invoke<AppSettingsView>("get_app_settings");
+      const [settings, providers] = await Promise.all([
+        invoke<AppSettingsView>("get_app_settings"),
+        invoke<SttProviderMeta[]>("get_stt_providers"),
+      ]);
       set({
         sttSettings: settings.stt,
+        sttProviders: providers,
         piSettings: { ...settings.pi, mode: normalizePiMode(settings.pi.mode) },
         shortcutSettings: settings.shortcuts,
         localPi: settings.local_pi,
@@ -97,10 +107,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const saved = await invoke<AppSettingsView>("save_app_settings", {
         settings: {
           stt: {
+            provider: sttSettings.provider,
             api_key: apiKeyInput,
             api_endpoint: sttSettings.api_endpoint,
             model: sttSettings.model,
             workspace_id: sttSettings.workspace_id,
+            language: sttSettings.language,
+            sample_rate: sttSettings.sample_rate || null,
+            extra_config: sttSettings.extra_config,
           },
           pi: {
             mode: normalizePiMode(piSettings.mode),
@@ -139,10 +153,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const message = await invoke<string>("test_stt_settings", {
         settings: {
+          provider: sttSettings.provider,
           api_key: apiKeyInput,
           api_endpoint: sttSettings.api_endpoint,
           model: sttSettings.model,
           workspace_id: sttSettings.workspace_id,
+          language: sttSettings.language,
+          sample_rate: sttSettings.sample_rate || null,
+          extra_config: sttSettings.extra_config,
         },
       });
       set({ settingsStatus: message });
