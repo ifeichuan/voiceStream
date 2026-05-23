@@ -28,6 +28,10 @@ tokio = { version = "1", features = ["macros", "sync", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 tauri-plugin-global-shortcut = "2"
 portable-pty = "0.9.0"
+base64 = "0.22"
+url = "2"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["std"] }
