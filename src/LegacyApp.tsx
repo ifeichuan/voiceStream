@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal, useTerminal } from "@wterm/react";
 import "@wterm/react/css";
+import { WaveformAnimation } from "./components/WaveformAnimation";
 
 interface AudioChunk {
   timestamp: number;
@@ -1616,11 +1617,7 @@ function App() {
                         aria-live="polite"
                         aria-label="正在加载 Agent 会话"
                       >
-                        <div className="agent-loading-wave" aria-hidden="true">
-                          {Array.from({ length: 9 }, (_, index) => (
-                            <span key={index} />
-                          ))}
-                        </div>
+                        <WaveformAnimation />
                       </div>
                     )}
                     {shouldShowAgentTerminalJumpButton && (

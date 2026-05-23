@@ -1,19 +1,6 @@
 import { useMemo } from "react";
 import { useSettingsStore } from "../stores/settings";
 import { PI_MODES, PROMPT_TEMPLATES } from "../lib/constants";
-import {
-  mutedClass,
-  ghostButtonClass,
-  sectionClass,
-  sectionHeadClass,
-  sectionTitleClass,
-  formGridClass,
-  fieldClass,
-  fieldLabelClass,
-  inputClass,
-  textareaClass,
-  metaCardClass,
-} from "../lib/styles";
 
 export default function Pi() {
   const { piSettings, setPiSettings, localPi } = useSettingsStore();
@@ -81,27 +68,27 @@ export default function Pi() {
 
   return (
     <div className="grid gap-[34px] pt-7">
-      <section className={sectionClass}>
-        <div className={`${sectionHeadClass} max-[760px]:flex-col max-[760px]:items-start`}>
+      <section className="section-divider">
+        <div className="section-head max-[760px]:flex-col max-[760px]:items-start">
           <div>
-            <h3 className={sectionTitleClass}>Pi</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>模型与运行方式。</p>
+            <h3 className="section-title">Pi</h3>
+            <p className="mt-1.5 text-paper-muted">模型与运行方式。</p>
           </div>
           <div className="flex gap-2.5">
-            <button className={ghostButtonClass} type="button" onClick={applyLocalPiDefaults}>
+            <button className="btn-ghost" type="button" onClick={applyLocalPiDefaults}>
               使用本机默认值
             </button>
-            <button className={ghostButtonClass} type="button" onClick={useNativePiConfig}>
+            <button className="btn-ghost" type="button" onClick={useNativePiConfig}>
               跟随本机 Pi（清空覆盖）
             </button>
           </div>
         </div>
 
-        <div className={formGridClass}>
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>模式</span>
+        <div className="form-grid">
+          <label className="field">
+            <span className="field-label">模式</span>
             <select
-              className={inputClass}
+              className="input"
               value={piSettings.mode}
               onChange={(e) => setPiSettings((prev) => ({ ...prev, mode: e.target.value }))}
             >
@@ -113,8 +100,8 @@ export default function Pi() {
             </select>
           </label>
 
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>复用进程</span>
+          <label className="field">
+            <span className="field-label">复用进程</span>
             <input
               className="mt-2.5 h-5 min-h-5 w-5 accent-paper-accent"
               type="checkbox"
@@ -123,10 +110,10 @@ export default function Pi() {
             />
           </label>
 
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>Provider</span>
+          <label className="field">
+            <span className="field-label">Provider</span>
             <select
-              className={inputClass}
+              className="input"
               value={isManualProvider ? "" : piSettings.provider}
               onChange={(e) => applyProviderFromLocal(e.target.value)}
             >
@@ -152,7 +139,7 @@ export default function Pi() {
             </select>
             {isManualProvider && (
               <input
-                className={inputClass}
+                className="input"
                 type="text"
                 value={piSettings.provider}
                 onChange={(e) => setPiSettings((prev) => ({ ...prev, provider: e.target.value }))}
@@ -161,11 +148,11 @@ export default function Pi() {
             )}
           </label>
 
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>模型</span>
+          <label className="field">
+            <span className="field-label">模型</span>
             {selectedProvider && selectedProvider.models.length > 0 ? (
               <select
-                className={inputClass}
+                className="input"
                 value={
                   selectedProvider.models.some((m) => m.id === piSettings.model)
                     ? piSettings.model
@@ -183,7 +170,7 @@ export default function Pi() {
               </select>
             ) : (
               <input
-                className={inputClass}
+                className="input"
                 type="text"
                 value={piSettings.model}
                 onChange={(e) => setPiSettings((prev) => ({ ...prev, model: e.target.value }))}
@@ -194,35 +181,35 @@ export default function Pi() {
         </div>
       </section>
 
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>本机 Pi</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>本机配置映射。</p>
+            <h3 className="section-title">本机 Pi</h3>
+            <p className="mt-1.5 text-paper-muted">本机配置映射。</p>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-5 max-[900px]:grid-cols-1">
-          <div className={metaCardClass}>
-            <span className={fieldLabelClass}>settings.json</span>
+          <div className="meta-card">
+            <span className="field-label">settings.json</span>
             <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
               {localPi.settings_path || "未找到"}
             </strong>
           </div>
-          <div className={metaCardClass}>
-            <span className={fieldLabelClass}>models.json</span>
+          <div className="meta-card">
+            <span className="field-label">models.json</span>
             <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
               {localPi.models_path || "未找到"}
             </strong>
           </div>
-          <div className={metaCardClass}>
-            <span className={fieldLabelClass}>默认 Provider</span>
+          <div className="meta-card">
+            <span className="field-label">默认 Provider</span>
             <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
               {localPi.default_provider || "未设置"}
             </strong>
           </div>
-          <div className={metaCardClass}>
-            <span className={fieldLabelClass}>默认模型</span>
+          <div className="meta-card">
+            <span className="field-label">默认模型</span>
             <strong className="mt-3 block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
               {localPi.default_model || "未设置"}
             </strong>
@@ -250,7 +237,7 @@ export default function Pi() {
 
           {nativeProviders.length > 0 && (
             <div className="mt-4 border-t border-paper-line pt-3">
-              <p className={fieldLabelClass}>Pi 原生可用 Provider（CLI）</p>
+              <p className="field-label">Pi 原生可用 Provider（CLI）</p>
               {nativeProviders.map((provider) => (
                 <button
                   key={provider.id}
@@ -273,19 +260,19 @@ export default function Pi() {
         </div>
       </section>
 
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>模板与覆盖</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>编辑这里，不直接改本机文件。</p>
+            <h3 className="section-title">模板与覆盖</h3>
+            <p className="mt-1.5 text-paper-muted">编辑这里，不直接改本机文件。</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-y-[26px]">
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>预设</span>
+          <label className="field">
+            <span className="field-label">预设</span>
             <select
-              className={inputClass}
+              className="input"
               value={piSettings.prompt_template_key}
               onChange={(e) =>
                 setPiSettings((prev) => ({ ...prev, prompt_template_key: e.target.value }))
@@ -299,10 +286,10 @@ export default function Pi() {
             </select>
           </label>
 
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>提示词模板</span>
+          <label className="field">
+            <span className="field-label">提示词模板</span>
             <textarea
-              className={textareaClass}
+              className="textarea"
               rows={11}
               value={piSettings.custom_prompt_template}
               onChange={(e) =>
@@ -310,13 +297,13 @@ export default function Pi() {
               }
               placeholder="{text}"
             />
-            <small className={mutedClass}>用于覆盖默认模板。</small>
+            <small className="text-paper-muted">用于覆盖默认模板。</small>
           </label>
 
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>Provider JSON 覆盖</span>
+          <label className="field">
+            <span className="field-label">Provider JSON 覆盖</span>
             <textarea
-              className={textareaClass}
+              className="textarea"
               rows={12}
               value={piSettings.provider_json}
               onChange={(e) =>
@@ -324,27 +311,27 @@ export default function Pi() {
               }
               placeholder='{"providers": {...}}'
             />
-            <small className={mutedClass}>只写入应用设置，不会修改 ~/.pi/agent/models.json。</small>
+            <small className="text-paper-muted">只写入应用设置，不会修改 ~/.pi/agent/models.json。</small>
           </label>
         </div>
       </section>
 
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>本机文件参考</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>只读，用于对照。</p>
+            <h3 className="section-title">本机文件参考</h3>
+            <p className="mt-1.5 text-paper-muted">只读，用于对照。</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-y-[26px]">
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>~/.pi/agent/settings.json（只读）</span>
-            <textarea className={textareaClass} rows={8} value={localPi.raw_settings_json} readOnly />
+          <label className="field">
+            <span className="field-label">~/.pi/agent/settings.json（只读）</span>
+            <textarea className="textarea" rows={8} value={localPi.raw_settings_json} readOnly />
           </label>
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>~/.pi/agent/models.json（只读）</span>
-            <textarea className={textareaClass} rows={14} value={localPi.raw_models_json} readOnly />
+          <label className="field">
+            <span className="field-label">~/.pi/agent/models.json（只读）</span>
+            <textarea className="textarea" rows={14} value={localPi.raw_models_json} readOnly />
           </label>
         </div>
       </section>

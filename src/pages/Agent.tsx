@@ -10,14 +10,7 @@ import {
   DEFAULT_AGENT_SHORTCUT,
 } from "../lib/constants";
 import { getErrorMessage, formatTaskTime, statusLabel } from "../lib/utils";
-import {
-  mutedClass,
-  ghostButtonClass,
-  sectionHeadClass,
-  sectionTitleClass,
-  metaCardClass,
-  fieldLabelClass,
-} from "../lib/styles";
+import { WaveformAnimation } from "../components/WaveformAnimation";
 import { useAgentStore } from "../stores/agent";
 import { useSettingsStore } from "../stores/settings";
 import type { AgentSessionView, AgentTerminalOutputEvent, AgentTerminalStatusEvent } from "../types";
@@ -380,10 +373,10 @@ export default function Agent() {
     <div className="grid min-h-0 flex-1 gap-[24px] pt-7 pb-7">
       <section className="grid h-full min-h-0 grid-cols-[minmax(250px,0.36fr)_minmax(0,1fr)] gap-8 max-[960px]:grid-cols-1 max-[960px]:grid-rows-[minmax(128px,0.34fr)_minmax(280px,1fr)]">
         <div className="flex min-h-0 flex-col border-b border-paper-line pb-7">
-          <div className={sectionHeadClass}>
+          <div className="section-head">
             <div>
-              <h3 className={sectionTitleClass}>Agent 任务</h3>
-              <p className={`mt-1.5 ${mutedClass}`}>
+              <h3 className="section-title">Agent 任务</h3>
+              <p className="mt-1.5 text-paper-muted">
                 {agentTasks.length
                   ? `${agentTasks.length} 个任务`
                   : `按 ${shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT} 创建任务`}
@@ -422,16 +415,16 @@ export default function Agent() {
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-paper-line pb-7">
-          <div className={`${sectionHeadClass} max-[760px]:flex-col max-[760px]:items-start`}>
+          <div className="section-head max-[760px]:flex-col max-[760px]:items-start">
             <div className="min-w-0">
               <h3 className="max-w-[72ch] truncate text-base font-semibold tracking-[-0.03em]">
                 {selectedAgentTask?.title || "会话"}
               </h3>
-              <p className={`mt-1.5 ${mutedClass}`}>{selectedAgentTaskStatusText}</p>
+              <p className="mt-1.5 text-paper-muted">{selectedAgentTaskStatusText}</p>
             </div>
             <div className="flex flex-wrap gap-2.5">
               <button
-                className={ghostButtonClass}
+                className="btn-ghost"
                 type="button"
                 onClick={refreshAgentSession}
                 disabled={!selectedAgentTask}
@@ -439,7 +432,7 @@ export default function Agent() {
                 刷新
               </button>
               <button
-                className={ghostButtonClass}
+                className="btn-ghost"
                 type="button"
                 onClick={() => setIsAgentDetailOpen(true)}
                 disabled={!selectedAgentTask}
@@ -495,11 +488,7 @@ export default function Agent() {
                   aria-live="polite"
                   aria-label="正在加载 Agent 会话"
                 >
-                  <div className="agent-loading-wave" aria-hidden="true">
-                    {Array.from({ length: 9 }, (_, index) => (
-                      <span key={index} />
-                    ))}
-                  </div>
+                  <WaveformAnimation />
                 </div>
               )}
               {shouldShowAgentTerminalJumpButton && (
@@ -541,29 +530,29 @@ export default function Agent() {
                 <h3 id="agent-detail-title" className="truncate text-base font-semibold tracking-[-0.03em]">
                   {selectedAgentTask.title}
                 </h3>
-                <p className={`mt-1.5 ${mutedClass}`}>{agentSessionStatus}</p>
+                <p className="mt-1.5 text-paper-muted">{agentSessionStatus}</p>
               </div>
-              <button className={ghostButtonClass} type="button" onClick={() => setIsAgentDetailOpen(false)}>
+              <button className="btn-ghost" type="button" onClick={() => setIsAgentDetailOpen(false)}>
                 关闭
               </button>
             </div>
 
             <div className="grid gap-7 py-5">
               <div className="grid grid-cols-3 gap-5 max-[760px]:grid-cols-1">
-                <div className={metaCardClass}>
-                  <span className={fieldLabelClass}>状态</span>
+                <div className="meta-card">
+                  <span className="field-label">状态</span>
                   <strong className="mt-2 block text-[0.95rem] font-semibold">
                     {selectedAgentTaskStatus}
                   </strong>
                 </div>
-                <div className={metaCardClass}>
-                  <span className={fieldLabelClass}>JSONL</span>
+                <div className="meta-card">
+                  <span className="field-label">JSONL</span>
                   <strong className="mt-2 block text-[0.95rem] font-semibold">
                     {terminalLineCount}
                   </strong>
                 </div>
-                <div className={metaCardClass}>
-                  <span className={fieldLabelClass}>事件</span>
+                <div className="meta-card">
+                  <span className="field-label">事件</span>
                   <strong className="mt-2 block text-[0.95rem] font-semibold">
                     {selectedAgentTask.events.length}
                   </strong>
@@ -572,9 +561,9 @@ export default function Agent() {
 
               <section className="border-b border-paper-line pb-5">
                 <div className="mb-3 flex items-center justify-between gap-4">
-                  <span className={fieldLabelClass}>恢复指令</span>
+                  <span className="field-label">恢复指令</span>
                   <button
-                    className={ghostButtonClass}
+                    className="btn-ghost"
                     type="button"
                     onClick={copyResumeCommand}
                     disabled={!agentSession?.resume_command}
@@ -588,14 +577,14 @@ export default function Agent() {
               </section>
 
               <section className="border-b border-paper-line pb-5">
-                <span className={fieldLabelClass}>任务输入</span>
+                <span className="field-label">任务输入</span>
                 <p className="mt-3 whitespace-pre-wrap text-[0.9rem] text-paper-muted [line-height:1.65]">
                   {selectedAgentTask.transcript}
                 </p>
               </section>
 
               <section className="border-b border-paper-line pb-5">
-                <span className={fieldLabelClass}>执行日志</span>
+                <span className="field-label">执行日志</span>
                 <div className="mt-3 max-h-64 overflow-auto font-mono text-[0.78rem] text-paper-muted [line-height:1.6]">
                   {selectedAgentTask.events.length === 0 && <div>暂无事件。</div>}
                   {selectedAgentTask.events.map((event, index) => (
@@ -612,7 +601,7 @@ export default function Agent() {
 
               {agentSession?.parse_errors.length ? (
                 <section className="border-b border-paper-line pb-5">
-                  <span className={fieldLabelClass}>解析失败</span>
+                  <span className="field-label">解析失败</span>
                   <div className="mt-3 grid gap-2 font-mono text-[0.78rem] text-[oklch(0.56_0.2_28)]">
                     {agentSession.parse_errors.map((error, index) => (
                       <div key={`${error}-${index}`}>{error}</div>
@@ -623,7 +612,7 @@ export default function Agent() {
 
               {selectedAgentTask.error_text && (
                 <section className="border-b border-paper-line pb-5">
-                  <span className={fieldLabelClass}>错误</span>
+                  <span className="field-label">错误</span>
                   <div className="mt-3 whitespace-pre-wrap text-[0.86rem] text-[oklch(0.56_0.2_28)] [line-height:1.65]">
                     {selectedAgentTask.error_text}
                   </div>

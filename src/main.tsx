@@ -1,3 +1,4 @@
+import "@fontsource-variable/geist-mono";
 import { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
