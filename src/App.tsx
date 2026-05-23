@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { DEFAULT_AGENT_SHORTCUT, DEFAULT_SHORTCUT, NAV_ITEMS } from "./lib/constants";
-import { kickerClass, primaryButtonClass, ghostButtonClass } from "./lib/styles";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { useRecordingStore } from "./stores/recording";
 import { useSettingsStore } from "./stores/settings";
@@ -31,7 +30,7 @@ function App() {
           </div>
 
           <div className="pr-2.5">
-            <p className={kickerClass}>VoiceStream</p>
+            <p className="kicker">VoiceStream</p>
             <h1 className="mt-2.5 text-[clamp(1.85rem,2.2vw,2.4rem)] leading-[0.98] font-semibold tracking-[-0.07em]">
               语音设置
             </h1>
@@ -88,17 +87,17 @@ function App() {
       >
         <header className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 border-b border-paper-line bg-[color-mix(in_oklch,var(--color-paper-surface)_94%,white_6%)] py-[18px] pt-7 max-[760px]:flex-col max-[760px]:items-start">
           <div>
-            <p className={kickerClass}>设置</p>
+            <p className="kicker">设置</p>
             <h2 className="mt-1.5 text-[clamp(1.6rem,1.9vw,2.1rem)] font-semibold tracking-[-0.06em]">
               {currentNav?.label ?? "概览"}
             </h2>
           </div>
 
           <div className="flex flex-wrap gap-2.5">
-            <button className={ghostButtonClass} onClick={testSettings} disabled={isTestingSettings}>
+            <button className="btn-ghost" onClick={testSettings} disabled={isTestingSettings}>
               {isTestingSettings ? "测试中…" : "测试 STT"}
             </button>
-            <button className={primaryButtonClass} onClick={saveSettings}>
+            <button className="btn-primary" onClick={saveSettings}>
               保存设置
             </button>
           </div>

@@ -2,18 +2,6 @@ import { useEffect, useState } from "react";
 import { useSettingsStore } from "../stores/settings";
 import { DEFAULT_SHORTCUT, DEFAULT_AGENT_SHORTCUT } from "../lib/constants";
 import { shortcutFromKeyboardEvent } from "../lib/utils";
-import {
-  mutedClass,
-  primaryButtonClass,
-  ghostButtonClass,
-  sectionClass,
-  sectionHeadClass,
-  sectionTitleClass,
-  formGridClass,
-  fieldClass,
-  fieldLabelClass,
-  shortcutDisplayClass,
-} from "../lib/styles";
 
 export default function Shortcuts() {
   const { shortcutSettings, setShortcutSettings } = useSettingsStore();
@@ -50,25 +38,18 @@ export default function Shortcuts() {
 
   return (
     <div className="grid gap-[34px] pt-7">
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
-          <div>
-            <h3 className={sectionTitleClass}>全局快捷键</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>Agent 任务入口。</p>
-          </div>
-        </div>
-
-        <div className={formGridClass}>
-          <label className={fieldClass}>
-            <span className={fieldLabelClass}>听写快捷键</span>
-            <span className={shortcutDisplayClass}>
+      <section className="section-divider">
+        <div className="form-grid">
+          <label className="field">
+            <span className="field-label">听写快捷键</span>
+            <span className="shortcut-display">
               {shortcutSettings.dictation_shortcut || DEFAULT_SHORTCUT}
             </span>
-            <small className={mutedClass}>当前版本固定为听写入口。</small>
+            <small className="text-paper-muted">当前版本固定为听写入口。</small>
           </label>
 
-          <div className={fieldClass}>
-            <span className={fieldLabelClass}>Agent 快捷键</span>
+          <div className="field">
+            <span className="field-label">Agent 快捷键</span>
             <button
               className={[
                 "min-h-11 border-b px-0 pt-2.5 pb-3 text-left text-[1.12rem] font-semibold tracking-[-0.02em] transition duration-150",
@@ -86,14 +67,14 @@ export default function Shortcuts() {
                 ? "正在等待按键..."
                 : shortcutSettings.agent_shortcut || DEFAULT_AGENT_SHORTCUT}
             </button>
-            <small className={mutedClass}>{captureStatus}</small>
+            <small className="text-paper-muted">{captureStatus}</small>
           </div>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2.5">
           <button
             type="button"
-            className={primaryButtonClass}
+            className="btn-primary"
             onClick={() => {
               setIsCapturing(true);
               setCaptureStatus("请按下新的 Agent 快捷键，Esc 取消。");
@@ -103,7 +84,7 @@ export default function Shortcuts() {
           </button>
           <button
             type="button"
-            className={ghostButtonClass}
+            className="btn-ghost"
             onClick={() => {
               setIsCapturing(false);
               setCaptureStatus("已取消设置。");
@@ -114,7 +95,7 @@ export default function Shortcuts() {
           </button>
           <button
             type="button"
-            className={ghostButtonClass}
+            className="btn-ghost"
             onClick={() => {
               setIsCapturing(false);
               setShortcutSettings((prev) => ({ ...prev, agent_shortcut: DEFAULT_AGENT_SHORTCUT }));

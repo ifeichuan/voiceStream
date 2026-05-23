@@ -2,12 +2,6 @@ import { useRecordingStore } from "../stores/recording";
 import { useLogsStore } from "../stores/logs";
 import { useSettingsStore } from "../stores/settings";
 import { useAgentStore } from "../stores/agent";
-import {
-  mutedClass,
-  sectionClass,
-  sectionHeadClass,
-  sectionTitleClass,
-} from "../lib/styles";
 
 export default function Activity() {
   const { partialTranscript, finalTranscript, lastChunkInfo } = useRecordingStore();
@@ -17,11 +11,11 @@ export default function Activity() {
 
   return (
     <div className="grid gap-8 pt-7">
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>Notify Channel</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>VoiceStream 语音通知。</p>
+            <h3 className="section-title">Notify Channel</h3>
+            <p className="mt-1.5 text-paper-muted">VoiceStream 语音通知。</p>
           </div>
         </div>
 
@@ -51,11 +45,11 @@ export default function Activity() {
         </div>
       </section>
 
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>转写</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>转写结果。</p>
+            <h3 className="section-title">转写</h3>
+            <p className="mt-1.5 text-paper-muted">转写结果。</p>
           </div>
         </div>
 
@@ -72,11 +66,11 @@ export default function Activity() {
         </div>
       </section>
 
-      <section className={sectionClass}>
-        <div className={sectionHeadClass}>
+      <section className="section-divider">
+        <div className="section-head">
           <div>
-            <h3 className={sectionTitleClass}>活动日志</h3>
-            <p className={`mt-1.5 ${mutedClass}`}>{settingsStatus}</p>
+            <h3 className="section-title">活动日志</h3>
+            <p className="mt-1.5 text-paper-muted">{settingsStatus}</p>
           </div>
         </div>
 
@@ -89,7 +83,7 @@ export default function Activity() {
         </div>
 
         <div className="flex items-baseline justify-between gap-4 py-3.5 max-[760px]:flex-col max-[760px]:items-start">
-          <span className={mutedClass}>最近音频包</span>
+          <span className="text-paper-muted">最近音频包</span>
           <strong className="block break-words text-[1.25rem] font-semibold tracking-[-0.045em]">
             {lastChunkInfo}
           </strong>

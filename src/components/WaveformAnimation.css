@@ -1,0 +1,121 @@
+.waveform-animation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+}
+
+.waveform-animation--compact {
+  padding: 0 6px;
+}
+
+.waveform-animation span {
+  display: block;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--waveform-color, var(--color-paper-accent));
+  opacity: 0.72;
+  transform-origin: center;
+  animation-name: waveform-pulse;
+  animation-duration: 960ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: cubic-bezier(0.36, 0, 0.2, 1);
+}
+
+.waveform-animation--compact span {
+  height: 10px;
+}
+
+.waveform-animation--large span {
+  height: 20px;
+}
+
+.waveform-animation span:nth-child(1) {
+  animation-delay: -120ms;
+  animation-duration: 880ms;
+}
+
+.waveform-animation span:nth-child(2) {
+  animation-delay: -420ms;
+  animation-duration: 1100ms;
+}
+
+.waveform-animation span:nth-child(3) {
+  animation-delay: -260ms;
+  animation-duration: 820ms;
+}
+
+.waveform-animation span:nth-child(4) {
+  animation-delay: -540ms;
+  animation-duration: 1040ms;
+}
+
+.waveform-animation span:nth-child(5) {
+  animation-delay: -80ms;
+  animation-duration: 900ms;
+}
+
+.waveform-animation span:nth-child(6) {
+  animation-delay: -360ms;
+  animation-duration: 1180ms;
+}
+
+.waveform-animation span:nth-child(7) {
+  animation-delay: -180ms;
+  animation-duration: 860ms;
+}
+
+.waveform-animation span:nth-child(8) {
+  animation-delay: -500ms;
+  animation-duration: 980ms;
+}
+
+.waveform-animation span:nth-child(9) {
+  animation-delay: -300ms;
+  animation-duration: 1120ms;
+}
+
+@keyframes waveform-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.42);
+    opacity: 0.42;
+  }
+
+  32% {
+    transform: scaleY(1.85);
+    opacity: 0.82;
+  }
+
+  58% {
+    transform: scaleY(0.74);
+    opacity: 0.56;
+  }
+
+  78% {
+    transform: scaleY(1.28);
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveform-animation span {
+    animation: none;
+  }
+
+  .waveform-animation span:nth-child(odd) {
+    height: 22px;
+  }
+
+  .waveform-animation span:nth-child(even) {
+    height: 12px;
+  }
+
+  .waveform-animation--compact span:nth-child(odd) {
+    height: 16px;
+  }
+
+  .waveform-animation--compact span:nth-child(even) {
+    height: 8px;
+  }
+}
