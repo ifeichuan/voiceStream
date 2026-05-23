@@ -549,7 +549,6 @@ fn emit_status(app: &AppHandle, status: &str) {
     );
 }
 
-
 fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, String> {
     let mut request = settings
         .api_endpoint
@@ -582,4 +581,3 @@ fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, S
 
     Ok(request)
 }
-

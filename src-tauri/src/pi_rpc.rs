@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(60);
+const AGENT_PROMPT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Copy, Debug)]
 enum PiRpcLaunchMode {
@@ -32,7 +33,11 @@ struct PiRpcLaunchConfig {
 }
 
 impl PiRpcLaunchConfig {
-    fn for_mode(mode: PiRpcLaunchMode, app_root: &Path, enable_tooluse_output: bool) -> Result<Self, String> {
+    fn for_mode(
+        mode: PiRpcLaunchMode,
+        app_root: &Path,
+        enable_tooluse_output: bool,
+    ) -> Result<Self, String> {
         match mode {
             PiRpcLaunchMode::DictationFast => Ok(Self {
                 mode,
@@ -113,7 +118,10 @@ impl PiRpcTrace {
         let stage_ms = now.duration_since(self.last_mark).as_millis();
         let total_ms = now.duration_since(self.started_at).as_millis();
         if details.is_empty() {
-            eprintln!("[pi-rpc] {}: +{} ms (total {} ms)", stage, stage_ms, total_ms);
+            eprintln!(
+                "[pi-rpc] {}: +{} ms (total {} ms)",
+                stage, stage_ms, total_ms
+            );
         } else {
             eprintln!(
                 "[pi-rpc] {}: +{} ms (total {} ms) {}",
@@ -136,6 +144,92 @@ pub fn refine_text(text: &str) -> Result<String, String> {
     }
 
     refine_text_with_fresh_process(trimmed)
+}
+
+pub fn run_agent_task(
+    transcript: &str,
+    title: &str,
+    session_path: &Path,
+    mut on_event: impl FnMut(&str, &str),
+) -> Result<String, String> {
+    let transcript = transcript.trim();
+    if transcript.is_empty() {
+        return Err("agent task transcript is empty".to_string());
+    }
+
+    let mut trace = PiRpcTrace::new();
+    let (mut child, mut stdin, rx, stderr_buffer) = spawn_pi_rpc_for_agent_session(session_path)?;
+    trace.mark("spawn_agent_pi_rpc", "process started");
+
+    write_command(
+        &mut stdin,
+        &json!({
+            "id": "agent-session-name-1",
+            "type": "set_session_name",
+            "name": title,
+        }),
+    )?;
+    trace.mark("write_set_session_name", title);
+    wait_for_response(
+        &rx,
+        &mut child,
+        &stderr_buffer,
+        "agent-session-name-1",
+        DEFAULT_TIMEOUT,
+    )?;
+    trace.mark("set_session_name_ack", "response received");
+
+    let prompt = build_agent_task_prompt(transcript);
+    let result = run_agent_prompt_cycle(
+        &mut child,
+        &mut stdin,
+        &rx,
+        &stderr_buffer,
+        &mut trace,
+        "agent-prompt-1",
+        &prompt,
+        "write_agent_prompt",
+        &format!("input_chars={}", transcript.chars().count()),
+        "agent_prompt_ack",
+        &mut on_event,
+    );
+
+    shutdown_child(&mut child);
+    trace.mark("shutdown_agent_child", "agent process closed");
+    result
+}
+
+pub fn continue_agent_task(
+    message: &str,
+    session_path: &Path,
+    mut on_event: impl FnMut(&str, &str),
+) -> Result<String, String> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("continue message is empty".to_string());
+    }
+
+    let mut trace = PiRpcTrace::new();
+    let (mut child, mut stdin, rx, stderr_buffer) = spawn_pi_rpc_for_agent_session(session_path)?;
+    trace.mark("spawn_agent_pi_rpc_continue", "process started");
+
+    let result = run_agent_prompt_cycle(
+        &mut child,
+        &mut stdin,
+        &rx,
+        &stderr_buffer,
+        &mut trace,
+        "agent-continue-1",
+        message,
+        "write_agent_continue_prompt",
+        &format!("input_chars={}", message.chars().count()),
+        "agent_continue_prompt_ack",
+        &mut on_event,
+    );
+
+    shutdown_child(&mut child);
+    trace.mark("shutdown_agent_continue_child", "agent process closed");
+    result
 }
 
 pub fn warmup() {
@@ -257,18 +351,23 @@ fn refine_text_with_reusable_process(trimmed: &str) -> Result<String, String> {
     result
 }
 
-fn spawn_pi_rpc(
-) -> Result<(
-    Child,
-    ChildStdin,
-    mpsc::Receiver<RpcLine>,
-    Arc<Mutex<String>>,
-), String> {
+fn spawn_pi_rpc() -> Result<
+    (
+        Child,
+        ChildStdin,
+        mpsc::Receiver<RpcLine>,
+        Arc<Mutex<String>>,
+    ),
+    String,
+> {
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
     let runtime = settings::runtime_pi_settings();
     let launch_mode = current_launch_mode();
-    let enable_tooluse_output = runtime.prompt_template_key.trim().eq_ignore_ascii_case("tooluse-structured");
+    let enable_tooluse_output = runtime
+        .prompt_template_key
+        .trim()
+        .eq_ignore_ascii_case("tooluse-structured");
     let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root, enable_tooluse_output)?;
     let mut command = Command::new(&pi_path);
 
@@ -281,7 +380,11 @@ fn spawn_pi_rpc(
             .ok_or("missing session path for session mode".to_string())?;
         if let Some(parent) = session_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                format!("failed to create pi session dir {}: {}", parent.display(), e)
+                format!(
+                    "failed to create pi session dir {}: {}",
+                    parent.display(),
+                    e
+                )
             })?;
         }
         eprintln!("[pi-rpc] session path={}", session_path.display());
@@ -290,6 +393,61 @@ fn spawn_pi_rpc(
         command.arg("--no-session");
     }
 
+    apply_launch_flags(&mut command, &config);
+    apply_provider_flags(&mut command, &runtime);
+
+    log_launch(&pi_path, &app_root, &config, &runtime);
+
+    spawn_command(command)
+}
+
+fn spawn_pi_rpc_for_agent_session(
+    session_path: &Path,
+) -> Result<
+    (
+        Child,
+        ChildStdin,
+        mpsc::Receiver<RpcLine>,
+        Arc<Mutex<String>>,
+    ),
+    String,
+> {
+    let pi_path = resolve_pi_path();
+    let app_root = resolve_app_root()?;
+    let runtime = settings::runtime_pi_settings();
+    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root, false)?;
+    let mut command = Command::new(&pi_path);
+
+    if let Some(parent) = session_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create agent pi session dir {}: {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    command
+        .current_dir(&app_root)
+        .arg("--mode")
+        .arg("rpc")
+        .arg("--session")
+        .arg(session_path);
+
+    apply_launch_flags(&mut command, &config);
+    apply_provider_flags(&mut command, &runtime);
+
+    eprintln!(
+        "[pi-rpc] agent task session path={}",
+        session_path.display()
+    );
+    log_launch(&pi_path, &app_root, &config, &runtime);
+
+    spawn_command(command)
+}
+
+fn apply_launch_flags(command: &mut Command, config: &PiRpcLaunchConfig) {
     if config.disable_tools {
         command.arg("--no-tools");
     }
@@ -308,7 +466,24 @@ fn spawn_pi_rpc(
     for extension in &config.extension_paths {
         command.arg("-e").arg(extension);
     }
+}
 
+fn apply_provider_flags(command: &mut Command, runtime: &settings::RuntimePiSettings) {
+    if !runtime.provider.trim().is_empty() {
+        command.arg("--provider").arg(&runtime.provider);
+    }
+
+    if !runtime.model.trim().is_empty() {
+        command.arg("--model").arg(&runtime.model);
+    }
+}
+
+fn log_launch(
+    pi_path: &Path,
+    app_root: &Path,
+    config: &PiRpcLaunchConfig,
+    runtime: &settings::RuntimePiSettings,
+) {
     let extension_log = if config.extension_paths.is_empty() {
         "<none>".to_string()
     } else {
@@ -333,26 +508,36 @@ fn spawn_pi_rpc(
         pi_path.display()
     );
 
-    let selected_provider = (!runtime.provider.trim().is_empty()).then_some(runtime.provider.clone());
-    if let Some(provider) = selected_provider.as_deref() {
-        command.arg("--provider").arg(provider);
-    }
-
-    let selected_model = (!runtime.model.trim().is_empty()).then_some(runtime.model.clone());
-    if let Some(model) = selected_model.as_deref() {
-        command.arg("--model").arg(model);
-    }
-
     if !runtime.provider_json.trim().is_empty() {
         eprintln!("[pi-rpc] provider_json override configured in app settings");
     }
 
     eprintln!(
         "[pi-rpc] provider={} model={}",
-        selected_provider.as_deref().unwrap_or("<default>"),
-        selected_model.as_deref().unwrap_or("<default>")
+        if runtime.provider.trim().is_empty() {
+            "<default>"
+        } else {
+            runtime.provider.as_str()
+        },
+        if runtime.model.trim().is_empty() {
+            "<default>"
+        } else {
+            runtime.model.as_str()
+        }
     );
+}
 
+fn spawn_command(
+    mut command: Command,
+) -> Result<
+    (
+        Child,
+        ChildStdin,
+        mpsc::Receiver<RpcLine>,
+        Arc<Mutex<String>>,
+    ),
+    String,
+> {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -412,9 +597,13 @@ fn spawn_pi_rpc(
 }
 
 fn current_launch_mode() -> PiRpcLaunchMode {
-    match settings::runtime_pi_settings().mode.trim().to_ascii_lowercase().as_str() {
+    match settings::runtime_pi_settings()
+        .mode
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "dictation-voice" => PiRpcLaunchMode::DictationWithVoiceFeedback,
-        "agent" => PiRpcLaunchMode::AgentSession,
         _ => PiRpcLaunchMode::DictationFast,
     }
 }
@@ -678,14 +867,20 @@ fn wait_for_prompt_completion(
                                         .and_then(|item| item.get("name"))
                                         .and_then(Value::as_str)
                                         .unwrap_or("unknown");
-                                    trace.mark("first_toolcall_start", &format!("tool={}", tool_name));
+                                    trace.mark(
+                                        "first_toolcall_start",
+                                        &format!("tool={}", tool_name),
+                                    );
                                 }
                             }
                             Some("text_delta") => {
                                 if !saw_first_text_delta {
                                     saw_first_text_delta = true;
                                     if let Some(trace) = trace.as_deref_mut() {
-                                        trace.mark("first_text_delta", "assistant started streaming text");
+                                        trace.mark(
+                                            "first_text_delta",
+                                            "assistant started streaming text",
+                                        );
                                     }
                                 }
 
@@ -699,7 +894,9 @@ fn wait_for_prompt_completion(
                                 }
                             }
                             Some("toolcall_end") => {
-                                if let Some(value) = extract_optimized_from_toolcall_event(&line.value) {
+                                if let Some(value) =
+                                    extract_optimized_from_toolcall_event(&line.value)
+                                {
                                     tooluse_optimized = Some(value);
                                 }
                             }
@@ -714,7 +911,8 @@ fn wait_for_prompt_completion(
                                 .get("toolName")
                                 .and_then(Value::as_str)
                                 .unwrap_or("unknown");
-                            trace.mark("first_tool_execution_start", &format!("tool={}", tool_name));
+                            trace
+                                .mark("first_tool_execution_start", &format!("tool={}", tool_name));
                         }
                     }
                     Some("tool_execution_end") => {
@@ -736,7 +934,8 @@ fn wait_for_prompt_completion(
                         }
                     }
                     Some("message_end") => {
-                        if let Some(text) = extract_text_from_message_value(&line.value, "message") {
+                        if let Some(text) = extract_text_from_message_value(&line.value, "message")
+                        {
                             streamed_text = text;
                         }
                     }
@@ -752,7 +951,8 @@ fn wait_for_prompt_completion(
                         }
 
                         if streamed_text.trim().is_empty() {
-                            if let Some(text) = extract_last_assistant_text_from_agent_end(&line.value)
+                            if let Some(text) =
+                                extract_last_assistant_text_from_agent_end(&line.value)
                             {
                                 streamed_text = text;
                             }
@@ -792,6 +992,215 @@ fn wait_for_prompt_completion(
     }
 }
 
+fn wait_for_agent_task_completion(
+    rx: &mpsc::Receiver<RpcLine>,
+    child: &mut Child,
+    stderr: &Arc<Mutex<String>>,
+    timeout: Duration,
+    trace: &mut PiRpcTrace,
+    on_event: &mut impl FnMut(&str, &str),
+) -> Result<String, String> {
+    let deadline = Instant::now() + timeout;
+    let mut streamed_text = String::new();
+    let mut last_assistant_error: Option<String> = None;
+    let mut saw_first_text_delta = false;
+
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            shutdown_child(child);
+            return Err(format!(
+                "timed out waiting for pi agent_end{}",
+                format_stderr(stderr)
+            ));
+        };
+
+        match rx.recv_timeout(remaining) {
+            Ok(line) => {
+                if let Some(error) = extract_assistant_error_from_event(&line.value) {
+                    last_assistant_error = Some(error.clone());
+                    on_event("assistant-error", &error);
+                }
+
+                match line.value.get("type").and_then(Value::as_str) {
+                    Some("message_update") => {
+                        let event_type = line
+                            .value
+                            .get("assistantMessageEvent")
+                            .and_then(|event| event.get("type"))
+                            .and_then(Value::as_str);
+
+                        match event_type {
+                            Some("text_delta") => {
+                                if !saw_first_text_delta {
+                                    saw_first_text_delta = true;
+                                    trace.mark(
+                                        "agent_first_text_delta",
+                                        "assistant started streaming text",
+                                    );
+                                    on_event("text-start", "Agent 开始输出结果。");
+                                }
+
+                                if let Some(delta) = line
+                                    .value
+                                    .get("assistantMessageEvent")
+                                    .and_then(|event| event.get("delta"))
+                                    .and_then(Value::as_str)
+                                {
+                                    streamed_text.push_str(delta);
+                                    on_event("text-delta", delta);
+                                }
+                            }
+                            Some("toolcall_start") => {
+                                let tool_name = line
+                                    .value
+                                    .get("assistantMessageEvent")
+                                    .and_then(|event| event.get("partial"))
+                                    .and_then(|partial| partial.get("content"))
+                                    .and_then(Value::as_array)
+                                    .and_then(|content| content.first())
+                                    .and_then(|item| item.get("name"))
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("unknown");
+                                trace.mark("agent_toolcall_start", &format!("tool={}", tool_name));
+                                on_event("toolcall-start", &format!("准备调用工具：{}", tool_name));
+                            }
+                            Some("toolcall_end") => {
+                                on_event("toolcall-end", "工具调用请求已生成。");
+                            }
+                            _ => {}
+                        }
+                    }
+                    Some("tool_execution_start") => {
+                        let tool_name = line
+                            .value
+                            .get("toolName")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        trace.mark("agent_tool_execution_start", &format!("tool={}", tool_name));
+                        on_event("tool-start", &format!("正在执行工具：{}", tool_name));
+                    }
+                    Some("tool_execution_update") => {
+                        let tool_name = line
+                            .value
+                            .get("toolName")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        on_event("tool-update", &format!("工具执行中：{}", tool_name));
+                    }
+                    Some("tool_execution_end") => {
+                        let tool_name = line
+                            .value
+                            .get("toolName")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        let is_error = line
+                            .value
+                            .get("isError")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        trace.mark(
+                            "agent_tool_execution_end",
+                            &format!("tool={}, is_error={}", tool_name, is_error),
+                        );
+                        on_event(
+                            if is_error { "tool-error" } else { "tool-end" },
+                            &format!("工具执行结束：{}", tool_name),
+                        );
+                    }
+                    Some("message_end") => {
+                        if let Some(text) = extract_text_from_message_value(&line.value, "message")
+                        {
+                            streamed_text = text;
+                        }
+                    }
+                    Some("agent_end") => {
+                        trace.mark("agent_task_agent_end", "stream complete");
+                        if streamed_text.trim().is_empty() {
+                            if let Some(text) =
+                                extract_last_assistant_text_from_agent_end(&line.value)
+                            {
+                                streamed_text = text;
+                            }
+                        }
+
+                        if let Some(error) = last_assistant_error {
+                            if streamed_text.trim().is_empty() {
+                                shutdown_child(child);
+                                return Err(format!(
+                                    "pi rpc assistant error: {}{}",
+                                    error,
+                                    format_stderr(stderr)
+                                ));
+                            }
+                        }
+
+                        return Ok(streamed_text.trim().to_string());
+                    }
+                    _ => {}
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                shutdown_child(child);
+                return Err(format!(
+                    "timed out waiting for pi agent_end{}",
+                    format_stderr(stderr)
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                shutdown_child(child);
+                return Err(format!(
+                    "pi rpc stdout closed before agent_end{}",
+                    format_stderr(stderr)
+                ));
+            }
+        }
+    }
+}
+
+fn run_agent_prompt_cycle(
+    child: &mut Child,
+    stdin: &mut ChildStdin,
+    rx: &mpsc::Receiver<RpcLine>,
+    stderr_buffer: &Arc<Mutex<String>>,
+    trace: &mut PiRpcTrace,
+    prompt_id: &str,
+    message: &str,
+    write_stage: &str,
+    write_details: &str,
+    ack_stage: &str,
+    on_event: &mut impl FnMut(&str, &str),
+) -> Result<String, String> {
+    write_command(
+        stdin,
+        &json!({
+            "id": prompt_id,
+            "type": "prompt",
+            "message": message,
+        }),
+    )?;
+    trace.mark(write_stage, write_details);
+    on_event("prompt", "Agent 已收到输入。");
+
+    wait_for_response(rx, child, stderr_buffer, prompt_id, DEFAULT_TIMEOUT)?;
+    trace.mark(ack_stage, "response received");
+
+    wait_for_agent_task_completion(
+        rx,
+        child,
+        stderr_buffer,
+        AGENT_PROMPT_TIMEOUT,
+        trace,
+        on_event,
+    )
+}
+
+fn build_agent_task_prompt(transcript: &str) -> String {
+    format!(
+        "你是 VoiceStream 的后台 Agent。用户刚通过语音明确发起了一个本地后台任务。\n\n执行要求：\n1. 把 <task> 中的内容当作真实任务执行，而不是当作要整理或粘贴的文字。\n2. 可以使用当前 Pi 环境可用的工具来读取、分析、修改或验证本地项目。\n3. 开始后直接行动；除非缺少关键安全信息，否则不要反问。\n4. 输出要包含简洁进展和最终结果。\n5. 如果任务失败，说明失败原因和已完成的部分。\n\n<task>\n{}\n</task>",
+        transcript.trim()
+    )
+}
+
 fn complete_prompt_cycle(
     trimmed: &str,
     child: &mut Child,
@@ -822,11 +1231,15 @@ fn complete_prompt_cycle(
             "message": settings::runtime_pi_settings().prompt_template.replace("{text}", trimmed),
         }),
     )?;
-    trace.mark("write_prompt", &format!("input_chars={}", trimmed.chars().count()));
+    trace.mark(
+        "write_prompt",
+        &format!("input_chars={}", trimmed.chars().count()),
+    );
 
     wait_for_response(rx, child, stderr_buffer, "prompt-1", DEFAULT_TIMEOUT)?;
     trace.mark("prompt_ack", "response received");
-    let streamed_text = wait_for_prompt_completion(rx, child, stderr_buffer, PROMPT_TIMEOUT, Some(trace))?;
+    let streamed_text =
+        wait_for_prompt_completion(rx, child, stderr_buffer, PROMPT_TIMEOUT, Some(trace))?;
     trace.mark(
         "prompt_stream_complete",
         &format!("streamed_chars={}", streamed_text.chars().count()),
@@ -843,7 +1256,10 @@ fn complete_prompt_cycle(
         "[pi-rpc][debug] sanitize_streamed_result_miss raw_streamed={}",
         serde_json::to_string(&streamed_text).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
     );
-    trace.mark("sanitize_streamed_result_miss", "falling back to get_last_assistant_text");
+    trace.mark(
+        "sanitize_streamed_result_miss",
+        "falling back to get_last_assistant_text",
+    );
 
     write_command(
         stdin,
@@ -1090,8 +1506,7 @@ fn sanitize_result(result: &str, original_text: &str) -> String {
         let validated = validate_candidate(&json_optimized, original_text).unwrap_or_default();
         eprintln!(
             "[pi-rpc][sanitize] validated_json_result={}",
-            serde_json::to_string(&validated)
-                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+            serde_json::to_string(&validated).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
         );
         return validated;
     }
@@ -1100,12 +1515,14 @@ fn sanitize_result(result: &str, original_text: &str) -> String {
     if prompt_echo {
         eprintln!(
             "[pi-rpc][sanitize] looks_like_prompt_echo normalized={}",
-            serde_json::to_string(&normalized).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+            serde_json::to_string(&normalized)
+                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
         );
         if let Some(recovered) = recover_from_echo(&normalized, original_text) {
             eprintln!(
                 "[pi-rpc][sanitize] recovered_from_echo={}",
-                serde_json::to_string(&recovered).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
+                serde_json::to_string(&recovered)
+                    .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
             );
             return recovered;
         }

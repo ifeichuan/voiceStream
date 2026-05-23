@@ -17,7 +17,7 @@ Usage:
 Commands:
   dev-fast           Start app in DictationFast mode with Bailian Qwen flash
   dev-voice          Start app in dictation-voice mode with Bailian Qwen flash
-  dev-agent          Start app in agent mode with Bailian Qwen flash
+  dev-agent          Start app with Agent shortcut support using Bailian Qwen flash
   dev-fast-default   Start app in DictationFast mode without provider/model overrides
   bench [rounds]     Run repeated refine benchmark with Bailian Qwen flash
   bench-fresh [rounds]
@@ -81,7 +81,7 @@ case "$command" in
     run_tauri_dev "dictation-voice"
     ;;
   dev-agent)
-    run_tauri_dev "agent"
+    run_tauri_dev "dictation-fast"
     ;;
   dev-fast-default)
     VOICESTREAM_PI_MODE="dictation-fast" pnpm tauri dev

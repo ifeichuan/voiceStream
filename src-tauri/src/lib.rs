@@ -1,3 +1,4 @@
+mod agent_tasks;
 mod audio;
 mod native_hud;
 mod pi_rpc;
@@ -17,7 +18,8 @@ use stt::SttProvider;
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
-const HOTKEY_SHORTCUT: &str = "Cmd+Shift+Space";
+const DICTATION_SHORTCUT: &str = "Cmd+Shift+Space";
+const AGENT_SHORTCUT: &str = "Cmd+Shift+A";
 const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
 const HOTKEY_TAP_THRESHOLD_MS: u128 = 220;
 
@@ -40,6 +42,7 @@ pub struct HotkeySessionEvent {
     pub state: String,
     pub message: String,
     pub shortcut: String,
+    pub purpose: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -70,22 +73,60 @@ static STREAM_SLOT_LOCK: Mutex<()> = Mutex::new(());
 static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
 static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
 static HOTKEY_RECORDING: AtomicBool = AtomicBool::new(false);
-static HOTKEY_ARMED: AtomicBool = AtomicBool::new(true);
+static DICTATION_HOTKEY_ARMED: AtomicBool = AtomicBool::new(true);
+static AGENT_HOTKEY_ARMED: AtomicBool = AtomicBool::new(true);
 static HOTKEY_SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 static HOTKEY_TIMING: Mutex<Option<HotkeyTiming>> = Mutex::new(None);
 static HOTKEY_MODE: Mutex<HotkeyMode> = Mutex::new(HotkeyMode::Idle);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordingPurpose {
+    Dictation,
+    Agent,
+}
+
+impl RecordingPurpose {
+    fn shortcut(self) -> &'static str {
+        match self {
+            RecordingPurpose::Dictation => DICTATION_SHORTCUT,
+            RecordingPurpose::Agent => AGENT_SHORTCUT,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            RecordingPurpose::Dictation => "dictation",
+            RecordingPurpose::Agent => "agent",
+        }
+    }
+
+    fn listening_message(self) -> &'static str {
+        match self {
+            RecordingPurpose::Dictation => "Listening...",
+            RecordingPurpose::Agent => "Listening for Agent task...",
+        }
+    }
+}
 
 struct HotkeyTiming {
     session_id: u64,
     started_at: Instant,
     stopped_at: Option<Instant>,
+    purpose: RecordingPurpose,
 }
 
 enum HotkeyMode {
     Idle,
-    RecordingPendingDecision { pressed_at: Instant },
-    RecordingLatched,
-    RecordingStoppingOnRelease,
+    RecordingPendingDecision {
+        pressed_at: Instant,
+        purpose: RecordingPurpose,
+    },
+    RecordingLatched {
+        purpose: RecordingPurpose,
+    },
+    RecordingStoppingOnRelease {
+        purpose: RecordingPurpose,
+    },
 }
 
 #[tauri::command]
@@ -107,6 +148,57 @@ async fn test_stt_settings(
     settings: stt::SttSettingsInput,
 ) -> Result<String, String> {
     stt::test_settings(&app, settings).await
+}
+
+#[tauri::command]
+fn get_agent_tasks() -> Result<Vec<agent_tasks::AgentTask>, String> {
+    agent_tasks::list_tasks()
+}
+
+#[tauri::command]
+fn get_agent_session(task_id: String) -> Result<agent_tasks::AgentSessionView, String> {
+    agent_tasks::get_session_view(&task_id)
+}
+
+#[tauri::command]
+async fn continue_agent_task(
+    app: AppHandle,
+    task_id: String,
+    message: String,
+) -> Result<String, String> {
+    let task = agent_tasks::get_task(&task_id)?;
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        return Err("继续内容不能为空。".to_string());
+    }
+    if task.status == agent_tasks::AgentTaskStatus::Running {
+        return Err("这个 Agent 任务仍在执行中，先等当前轮结束。".to_string());
+    }
+
+    let _ = agent_tasks::mark_continuing(&app, &task_id, &message)?;
+    let task_for_runner = agent_tasks::get_task(&task_id)?;
+    let session_path = std::path::PathBuf::from(task_for_runner.session_path.clone());
+    let app_for_events = app.clone();
+    let task_id_for_events = task_id.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        pi_rpc::continue_agent_task(&message, &session_path, |kind, message| {
+            let _ = agent_tasks::append_event(&app_for_events, &task_id_for_events, kind, message);
+        })
+    })
+    .await
+    .map_err(|error| format!("pi agent continue task join failed: {}", error))?;
+
+    match result {
+        Ok(final_text) => {
+            let _ = agent_tasks::mark_completed(&app, &task_id, &final_text);
+            Ok(final_text)
+        }
+        Err(error) => {
+            let _ = agent_tasks::mark_failed(&app, &task_id, &error);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -324,13 +416,14 @@ fn emit_audio_level(app: &AppHandle, samples: &[i16]) {
     let _ = app.emit("audio-level", AudioLevelEvent { level });
 }
 
-fn emit_hotkey_state(app: &AppHandle, state: &str, message: &str) {
+fn emit_hotkey_state(app: &AppHandle, purpose: RecordingPurpose, state: &str, message: &str) {
     let _ = app.emit(
         "hotkey-session",
         HotkeySessionEvent {
             state: state.to_string(),
             message: message.to_string(),
-            shortcut: HOTKEY_SHORTCUT.to_string(),
+            shortcut: purpose.shortcut().to_string(),
+            purpose: purpose.as_str().to_string(),
         },
     );
 }
@@ -739,7 +832,7 @@ fn paste_text_to_cursor(text: &str) -> Result<(), String> {
     paste_result
 }
 
-fn handle_hotkey_pressed(app: &AppHandle) {
+fn handle_hotkey_pressed(app: &AppHandle, purpose: RecordingPurpose) {
     let mut mode = HOTKEY_MODE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -757,32 +850,40 @@ fn handle_hotkey_pressed(app: &AppHandle) {
                             session_id,
                             started_at: now,
                             stopped_at: None,
+                            purpose,
                         });
                     }
-                    *mode = HotkeyMode::RecordingPendingDecision { pressed_at: now };
+                    *mode = HotkeyMode::RecordingPendingDecision {
+                        pressed_at: now,
+                        purpose,
+                    };
                     log_timing(
                         Some(app),
                         session_id,
                         "session_started",
                         0,
-                        "hotkey recording started",
+                        &format!("{} hotkey recording started", purpose.as_str()),
                     );
                     native_hud::show_recording(app);
-                    emit_hotkey_state(app, "recording", "Listening...");
+                    emit_hotkey_state(app, purpose, "recording", purpose.listening_message());
                 }
                 Err(error) => {
                     HOTKEY_RECORDING.store(false, Ordering::SeqCst);
                     *mode = HotkeyMode::Idle;
                     native_hud::show_error(app, &error);
-                    emit_hotkey_state(app, "error", &error);
+                    emit_hotkey_state(app, purpose, "error", &error);
                 }
             }
         }
-        HotkeyMode::RecordingLatched => {
-            *mode = HotkeyMode::RecordingStoppingOnRelease;
-            emit_hotkey_state(app, "recording", "Release to stop.");
+        HotkeyMode::RecordingLatched {
+            purpose: active_purpose,
+        } if *active_purpose == purpose => {
+            *mode = HotkeyMode::RecordingStoppingOnRelease { purpose };
+            emit_hotkey_state(app, purpose, "recording", "Release to stop.");
         }
-        HotkeyMode::RecordingPendingDecision { .. } | HotkeyMode::RecordingStoppingOnRelease => {}
+        HotkeyMode::RecordingPendingDecision { .. }
+        | HotkeyMode::RecordingLatched { .. }
+        | HotkeyMode::RecordingStoppingOnRelease { .. } => {}
     }
 }
 
@@ -800,10 +901,45 @@ async fn optimize_transcript_with_pi(text: String) -> Result<String, String> {
         .map_err(|error| format!("pi rpc task join failed: {}", error))?
 }
 
+async fn run_agent_task_with_pi(
+    app: AppHandle,
+    task: agent_tasks::AgentTask,
+) -> Result<String, String> {
+    let task_id = task.id.clone();
+    let transcript = task.transcript.clone();
+    let title = task.title.clone();
+    let session_path = std::path::PathBuf::from(task.session_path.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        pi_rpc::run_agent_task(&transcript, &title, &session_path, |kind, message| {
+            let _ = agent_tasks::append_event(&app, &task_id, kind, message);
+        })
+    })
+    .await
+    .map_err(|error| format!("pi agent task join failed: {}", error))?
+}
+
+fn notify_user(title: &str, message: &str) {
+    let script = format!(
+        "display notification {} with title {}",
+        osascript_quote(message),
+        osascript_quote(title)
+    );
+    let _ = Command::new("osascript").arg("-e").arg(script).status();
+}
+
+fn osascript_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""))
+}
+
 fn maybe_run_pi_startup_self_test() {
     let enabled = env::var("VOICESTREAM_PI_STARTUP_TEST")
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
         .unwrap_or(false);
     if !enabled {
         return;
@@ -833,7 +969,7 @@ fn maybe_run_pi_startup_self_test() {
     });
 }
 
-fn finish_hotkey_recording(app: &AppHandle) {
+fn finish_hotkey_recording(app: &AppHandle, purpose: RecordingPurpose) {
     if !HOTKEY_RECORDING.swap(false, Ordering::SeqCst) {
         return;
     }
@@ -846,15 +982,19 @@ fn finish_hotkey_recording(app: &AppHandle) {
             session_id: 0,
             started_at: Instant::now(),
             stopped_at: None,
+            purpose,
         });
     timing_snapshot.stopped_at = Some(Instant::now());
+    let purpose = timing_snapshot.purpose;
 
     if let Some(stopped_at) = timing_snapshot.stopped_at {
         log_timing(
             Some(app),
             timing_snapshot.session_id,
             "recording",
-            stopped_at.duration_since(timing_snapshot.started_at).as_millis(),
+            stopped_at
+                .duration_since(timing_snapshot.started_at)
+                .as_millis(),
             "capture duration until stop",
         );
     }
@@ -862,12 +1002,12 @@ fn finish_hotkey_recording(app: &AppHandle) {
     if let Err(error) = stop_recording_internal() {
         native_hud::show_error(app, &error);
         schedule_hide_hud(app, 900);
-        emit_hotkey_state(app, "error", &error);
+        emit_hotkey_state(app, purpose, "error", &error);
         return;
     }
 
     native_hud::show_processing(app);
-    emit_hotkey_state(app, "processing", "Transcribing...");
+    emit_hotkey_state(app, purpose, "processing", "Transcribing...");
 
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -891,84 +1031,12 @@ fn finish_hotkey_recording(app: &AppHandle) {
                     "from recording start to final transcript",
                 );
 
-                native_hud::show_processing_text(&app, "Optimizing...");
-                emit_hotkey_state(&app, "processing", "Optimizing...");
-
-                let optimize_started_at = Instant::now();
-                let (final_text, pasted_message) =
-                    match optimize_transcript_with_pi(text.clone()).await {
-                        Ok(refined) if !refined.trim().is_empty() => {
-                            log_timing(
-                                Some(&app),
-                                timing_snapshot.session_id,
-                                "optimize",
-                                optimize_started_at.elapsed().as_millis(),
-                                &format!(
-                                    "input_chars={}, output_chars={}, optimized=true",
-                                    text.chars().count(),
-                                    refined.chars().count()
-                                ),
-                            );
-                            (refined, "Pasted optimized text".to_string())
-                        }
-                        Ok(_) => {
-                            log_timing(
-                                Some(&app),
-                                timing_snapshot.session_id,
-                                "optimize",
-                                optimize_started_at.elapsed().as_millis(),
-                                &format!(
-                                    "input_chars={}, output_chars=0, optimized=false-empty",
-                                    text.chars().count()
-                                ),
-                            );
-                            (text, "Pasted raw transcript".to_string())
-                        }
-                        Err(error) => {
-                            log_timing(
-                                Some(&app),
-                                timing_snapshot.session_id,
-                                "optimize_failed",
-                                optimize_started_at.elapsed().as_millis(),
-                                &error,
-                            );
-                            eprintln!("pi optimization failed: {}", error);
-                            (text, "Pi optimize failed, pasted raw transcript".to_string())
-                        }
-                    };
-
-                let paste_started_at = Instant::now();
-                match paste_text_to_cursor(&final_text) {
-                    Ok(()) => {
-                        log_timing(
-                            Some(&app),
-                            timing_snapshot.session_id,
-                            "paste",
-                            paste_started_at.elapsed().as_millis(),
-                            &format!("chars={}", final_text.chars().count()),
-                        );
-                        log_timing(
-                            Some(&app),
-                            timing_snapshot.session_id,
-                            "end_to_end",
-                            timing_snapshot.started_at.elapsed().as_millis(),
-                            "from recording start to paste complete",
-                        );
-                        native_hud::show_success(&app, &final_text);
-                        schedule_hide_hud(&app, 850);
-                        emit_hotkey_state(&app, "pasted", &pasted_message);
+                match purpose {
+                    RecordingPurpose::Dictation => {
+                        finish_dictation_transcript(&app, &timing_snapshot, text).await;
                     }
-                    Err(error) => {
-                        log_timing(
-                            Some(&app),
-                            timing_snapshot.session_id,
-                            "paste_failed",
-                            paste_started_at.elapsed().as_millis(),
-                            &error,
-                        );
-                        native_hud::show_error(&app, &error);
-                        schedule_hide_hud(&app, 1100);
-                        emit_hotkey_state(&app, "error", &error);
+                    RecordingPurpose::Agent => {
+                        finish_agent_transcript(&app, &timing_snapshot, text).await;
                     }
                 }
             }
@@ -982,7 +1050,7 @@ fn finish_hotkey_recording(app: &AppHandle) {
                 );
                 native_hud::show_error(&app, "No transcript");
                 schedule_hide_hud(&app, 900);
-                emit_hotkey_state(&app, "error", "No transcript captured");
+                emit_hotkey_state(&app, purpose, "error", "No transcript captured");
             }
             Err(error) => {
                 log_timing(
@@ -994,36 +1062,203 @@ fn finish_hotkey_recording(app: &AppHandle) {
                 );
                 native_hud::show_error(&app, &error);
                 schedule_hide_hud(&app, 1100);
-                emit_hotkey_state(&app, "error", &error);
+                emit_hotkey_state(&app, purpose, "error", &error);
             }
         }
     });
 }
 
-fn handle_hotkey_released(app: &AppHandle) {
+async fn finish_dictation_transcript(
+    app: &AppHandle,
+    timing_snapshot: &HotkeyTiming,
+    text: String,
+) {
+    native_hud::show_processing_text(app, "Optimizing...");
+    emit_hotkey_state(
+        app,
+        RecordingPurpose::Dictation,
+        "processing",
+        "Optimizing...",
+    );
+
+    let optimize_started_at = Instant::now();
+    let (final_text, pasted_message) = match optimize_transcript_with_pi(text.clone()).await {
+        Ok(refined) if !refined.trim().is_empty() => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "optimize",
+                optimize_started_at.elapsed().as_millis(),
+                &format!(
+                    "input_chars={}, output_chars={}, optimized=true",
+                    text.chars().count(),
+                    refined.chars().count()
+                ),
+            );
+            (refined, "Pasted optimized text".to_string())
+        }
+        Ok(_) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "optimize",
+                optimize_started_at.elapsed().as_millis(),
+                &format!(
+                    "input_chars={}, output_chars=0, optimized=false-empty",
+                    text.chars().count()
+                ),
+            );
+            (text, "Pasted raw transcript".to_string())
+        }
+        Err(error) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "optimize_failed",
+                optimize_started_at.elapsed().as_millis(),
+                &error,
+            );
+            eprintln!("pi optimization failed: {}", error);
+            (
+                text,
+                "Pi optimize failed, pasted raw transcript".to_string(),
+            )
+        }
+    };
+
+    let paste_started_at = Instant::now();
+    match paste_text_to_cursor(&final_text) {
+        Ok(()) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "paste",
+                paste_started_at.elapsed().as_millis(),
+                &format!("chars={}", final_text.chars().count()),
+            );
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "end_to_end",
+                timing_snapshot.started_at.elapsed().as_millis(),
+                "from recording start to paste complete",
+            );
+            native_hud::show_success(app, &final_text);
+            schedule_hide_hud(app, 850);
+            emit_hotkey_state(app, RecordingPurpose::Dictation, "pasted", &pasted_message);
+        }
+        Err(error) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "paste_failed",
+                paste_started_at.elapsed().as_millis(),
+                &error,
+            );
+            native_hud::show_error(app, &error);
+            schedule_hide_hud(app, 1100);
+            emit_hotkey_state(app, RecordingPurpose::Dictation, "error", &error);
+        }
+    }
+}
+
+async fn finish_agent_transcript(app: &AppHandle, timing_snapshot: &HotkeyTiming, text: String) {
+    native_hud::show_processing_text(app, "Agent started...");
+    emit_hotkey_state(
+        app,
+        RecordingPurpose::Agent,
+        "processing",
+        "Agent started...",
+    );
+
+    let task = match agent_tasks::create_task(app, &text) {
+        Ok(task) => task,
+        Err(error) => {
+            native_hud::show_error(app, &error);
+            schedule_hide_hud(app, 1100);
+            emit_hotkey_state(app, RecordingPurpose::Agent, "error", &error);
+            return;
+        }
+    };
+
+    let _ = agent_tasks::mark_running(app, &task.id);
+    native_hud::show_success(app, "Agent task started");
+    schedule_hide_hud(app, 850);
+
+    let agent_started_at = Instant::now();
+    match run_agent_task_with_pi(app.clone(), task.clone()).await {
+        Ok(final_text) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "agent_task",
+                agent_started_at.elapsed().as_millis(),
+                &format!(
+                    "task_id={}, output_chars={}",
+                    task.id,
+                    final_text.chars().count()
+                ),
+            );
+            let _ = agent_tasks::mark_completed(app, &task.id, &final_text);
+            notify_user("VoiceStream Agent 完成", &task.title);
+            emit_hotkey_state(
+                app,
+                RecordingPurpose::Agent,
+                "completed",
+                "Agent task completed",
+            );
+        }
+        Err(error) => {
+            log_timing(
+                Some(app),
+                timing_snapshot.session_id,
+                "agent_task_failed",
+                agent_started_at.elapsed().as_millis(),
+                &error,
+            );
+            let _ = agent_tasks::mark_failed(app, &task.id, &error);
+            notify_user("VoiceStream Agent 失败", &task.title);
+            emit_hotkey_state(app, RecordingPurpose::Agent, "error", &error);
+        }
+    }
+}
+
+fn handle_hotkey_released(app: &AppHandle, purpose: RecordingPurpose) {
     let mut mode = HOTKEY_MODE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     match &*mode {
         HotkeyMode::Idle => {}
-        HotkeyMode::RecordingPendingDecision { pressed_at } => {
+        HotkeyMode::RecordingPendingDecision {
+            pressed_at,
+            purpose: active_purpose,
+        } if *active_purpose == purpose => {
             let held_ms = pressed_at.elapsed().as_millis();
             if held_ms >= HOTKEY_TAP_THRESHOLD_MS {
                 *mode = HotkeyMode::Idle;
                 drop(mode);
-                finish_hotkey_recording(app);
+                finish_hotkey_recording(app, purpose);
             } else {
-                *mode = HotkeyMode::RecordingLatched;
-                emit_hotkey_state(app, "recording", "Listening... Press again to stop.");
+                *mode = HotkeyMode::RecordingLatched { purpose };
+                emit_hotkey_state(
+                    app,
+                    purpose,
+                    "recording",
+                    "Listening... Press again to stop.",
+                );
             }
         }
-        HotkeyMode::RecordingLatched => {}
-        HotkeyMode::RecordingStoppingOnRelease => {
+        HotkeyMode::RecordingStoppingOnRelease {
+            purpose: active_purpose,
+        } if *active_purpose == purpose => {
             *mode = HotkeyMode::Idle;
             drop(mode);
-            finish_hotkey_recording(app);
+            finish_hotkey_recording(app, purpose);
         }
+        HotkeyMode::RecordingPendingDecision { .. }
+        | HotkeyMode::RecordingLatched { .. }
+        | HotkeyMode::RecordingStoppingOnRelease { .. } => {}
     }
 }
 
@@ -1042,29 +1277,47 @@ pub fn run() {
                 }
             }
 
+            agent_tasks::initialize(&app.handle())?;
+
             #[cfg(desktop)]
             {
                 native_hud::initialize(&app.handle());
-                let toggle_recording_shortcut =
+                let dictation_shortcut =
                     Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+                let agent_shortcut =
+                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyA);
 
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcut(toggle_recording_shortcut.clone())?
+                        .with_shortcut(dictation_shortcut.clone())?
+                        .with_shortcut(agent_shortcut.clone())?
                         .with_handler(move |app, shortcut, event| {
-                            if shortcut != &toggle_recording_shortcut {
+                            let shortcut_purpose = if shortcut == &dictation_shortcut {
+                                Some(RecordingPurpose::Dictation)
+                            } else if shortcut == &agent_shortcut {
+                                Some(RecordingPurpose::Agent)
+                            } else {
+                                None
+                            };
+
+                            let Some(purpose) = shortcut_purpose else {
                                 return;
-                            }
+                            };
+
+                            let armed = match purpose {
+                                RecordingPurpose::Dictation => &DICTATION_HOTKEY_ARMED,
+                                RecordingPurpose::Agent => &AGENT_HOTKEY_ARMED,
+                            };
 
                             match event.state() {
                                 ShortcutState::Pressed => {
-                                    if HOTKEY_ARMED.swap(false, Ordering::SeqCst) {
-                                        handle_hotkey_pressed(app);
+                                    if armed.swap(false, Ordering::SeqCst) {
+                                        handle_hotkey_pressed(app, purpose);
                                     }
                                 }
                                 ShortcutState::Released => {
-                                    HOTKEY_ARMED.store(true, Ordering::SeqCst);
-                                    handle_hotkey_released(app);
+                                    armed.store(true, Ordering::SeqCst);
+                                    handle_hotkey_released(app, purpose);
                                 }
                             }
                         })
@@ -1078,6 +1331,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_stt_settings,
+            get_agent_tasks,
+            get_agent_session,
+            continue_agent_task,
             save_stt_settings,
             test_stt_settings,
             get_app_settings,

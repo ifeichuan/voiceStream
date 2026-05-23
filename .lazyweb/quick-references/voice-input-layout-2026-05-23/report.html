@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoiceStream Current UI Report</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f5;
+        --panel: #fbfbf9;
+        --ink: #242722;
+        --muted: #676d63;
+        --line: #d8ddd4;
+        --accent: #2f6670;
+        --soft: #edf4f2;
+        --warn: #f5efe2;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.65;
+      }
+      main {
+        width: min(1120px, calc(100vw - 40px));
+        margin: 0 auto;
+        padding: 42px 0 56px;
+      }
+      header {
+        display: grid;
+        gap: 10px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        margin: 0;
+        font-size: 40px;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+      h2 {
+        margin: 38px 0 12px;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+      h3 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 0 0 12px;
+        max-width: 78ch;
+      }
+      .meta,
+      .muted {
+        color: var(--muted);
+      }
+      .callout,
+      .warning {
+        margin-top: 18px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .callout {
+        background: var(--soft);
+      }
+      .warning {
+        background: var(--warn);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+      .box {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 16px;
+      }
+      .box strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+      ul {
+        margin: 10px 0 0;
+        padding-left: 22px;
+      }
+      li {
+        margin: 6px 0;
+      }
+      code,
+      pre {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fcfcfb;
+      }
+      figure {
+        margin: 18px 0 26px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+      img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 5px;
+        border: 1px solid var(--line);
+      }
+      figcaption {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      @media (max-width: 820px) {
+        main {
+          width: min(100vw - 24px, 680px);
+          padding-top: 28px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          font-size: 32px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="meta">2026-05-23 · Current code first, Lazyweb second</p>
+        <h1>VoiceStream Current UI Report</h1>
+        <p class="muted">这版报告先看当前 <code>App.tsx</code> 和 <code>App.css</code>，再谈桌面应用结构和 Lazyweb 参考。</p>
+      </header>
+
+      <section class="callout">
+        <strong>核心判断：</strong>当前代码呈现的是“设置/诊断控制台”：<code>overview / speech / pi / agent / activity</code>。目标应该修正为桌面双表面：弹出输入胶囊 + 主动唤起的管理面板。管理面板默认应是 Dashboard，Settings 单独拆出。
+      </section>
+
+      <section class="warning">
+        <strong>实测备注：</strong>当前 <code>127.0.0.1:1420</code> 在普通 Edge 浏览器里没有正常显示 React 管理面板，只看到空白区域和浏览器翻译浮层。<code>pnpm build</code> 通过。白屏具体原因 <code>uncertain</code>，可能与 Tauri API、普通浏览器环境或浏览器扩展有关。
+      </section>
+
+      <h2>当前代码结构</h2>
+      <pre>type NavKey = "overview" | "speech" | "pi" | "agent" | "activity";
+
+NAV_ITEMS:
+- 概览
+- 语音识别
+- Pi
+- Agent
+- 活动</pre>
+      <p>这不是 Dashboard + Settings 的 IA，而是把概览、STT 设置、Pi 设置、Agent 和日志都放成了一级导航。</p>
+
+      <div class="grid">
+        <section class="box">
+          <strong>Shell</strong>
+          <p>当前是 248px sidebar + scrollable main。左侧标题是 <code>VoiceStream / 语音设置</code>，主区 sticky header 永远显示 <code>测试 STT</code> 和 <code>保存设置</code>。</p>
+        </section>
+        <section class="box">
+          <strong>视觉语言</strong>
+          <p>CSS token 是 <code>paper-*</code>，整体偏纸面文档：温暖背景、下划线表单、大量 border-bottom、pill 按钮、clamp 大标题。</p>
+        </section>
+      </div>
+
+      <h2>当前页面判断</h2>
+      <h3>Overview</h3>
+      <p>Overview 其实是 Dashboard 雏形：状态、音频包、Pi 路由、当前配置都有。但标题和文案是“语音输入设置”，所以用户会把它理解成设置页。</p>
+      <ul>
+        <li>应改成 <code>Dashboard</code>。</li>
+        <li>不要把管理面板定义成主输入界面。</li>
+        <li>开始录音按钮如果保留，应明确是测试或手动检查。</li>
+      </ul>
+
+      <h3>Speech / Pi</h3>
+      <p><code>speech</code> 和 <code>pi</code> 都是配置页，应该进入 Settings 内部，而不是一级导航。</p>
+      <pre>Settings
+├─ STT
+├─ Pi Routing
+├─ Prompt Template
+├─ Local Pi Files
+└─ Advanced JSON</pre>
+
+      <h3>Agent</h3>
+      <p>Agent 当前的 task list + task detail 是对的。需要调整的是层级：最终结果和错误信息应比 raw events、session path 更突出。</p>
+
+      <h3>Activity</h3>
+      <p>Activity 应拆成 Dashboard 摘要 + History。Dashboard 只看最近状态，History 才承载完整 transcript、logs、audio chunk。</p>
+
+      <h2>产品模型纠偏</h2>
+      <pre>VoiceStream
+├─ Popup Capsule
+│  ├─ waveform
+│  ├─ live transcript
+│  ├─ processing
+│  └─ success / error
+└─ Management Panel
+   ├─ Dashboard
+   ├─ Agent
+   ├─ History
+   └─ Settings</pre>
+      <p>胶囊是真正输入表面；管理面板是状态、诊断、历史、任务和设置。</p>
+
+      <h2>Dashboard 建议</h2>
+      <p>Dashboard 可以直接复用当前 React state，不需要先重写后端。</p>
+      <pre>Dashboard
+├─ Status Strip
+│  ├─ Ready / Recording / Processing / Error
+│  ├─ Dictation shortcut
+│  └─ Agent shortcut
+├─ Readiness
+│  ├─ STT key
+│  ├─ STT model
+│  ├─ Pi provider/model
+│  └─ process reuse
+├─ Pipeline: Mic -> STT -> Pi -> Paste
+├─ Latest Dictation
+├─ Agent Summary
+└─ Recent Activity</pre>
+
+      <h2>Lazyweb 参考怎么用</h2>
+      <p>Lazyweb 搜到的大多是网页、landing、文档和 Web dashboard，只能间接参考。胶囊形态要看本地 <code>docs/features/hud-capsule.md</code>。</p>
+      <figure>
+        <img src="references/vibe-kanban-four-panel.png" alt="Vibe Kanban structure reference" />
+        <figcaption>间接参考：复杂工具的导航/主区/上下文结构。不能直接照搬成网页工作台。</figcaption>
+      </figure>
+      <figure>
+        <img src="references/amie-docs-sidebar.png" alt="Settings organization reference" />
+        <figcaption>间接参考：设置/说明内容的目录式组织。VoiceStream 应更像 desktop preferences，而不是文档站。</figcaption>
+      </figure>
+
+      <h2>落地顺序</h2>
+      <ol>
+        <li>把 <code>overview</code> 改成 <code>Dashboard</code>。</li>
+        <li>把 <code>speech</code> 和 <code>pi</code> 移到 <code>Settings</code>。</li>
+        <li>把 <code>activity</code> 拆成 Dashboard 摘要 + History。</li>
+        <li>保留 <code>Agent</code> top-level。</li>
+        <li>把全局 <code>测试 STT / 保存设置</code> 移到 Settings。</li>
+        <li>第二轮再处理视觉 token，从 <code>paper-*</code> 转向 desktop utility dashboard。</li>
+      </ol>
+
+      <h2>不确定点</h2>
+      <ul>
+        <li>普通浏览器白屏具体原因 <code>uncertain</code>，但 build 通过。</li>
+        <li>Tauri 窗口里的完整视觉状态这次没有成功截图验证，<code>uncertain</code>。</li>
+        <li>普通 dictation history 是否持久化 <code>uncertain</code>。</li>
+        <li>React 端是否能拿到真实 RMS/amplitude <code>uncertain</code>，当前看到的是 audio chunk metadata。</li>
+      </ul>
+    </main>
+  </body>
+</html>

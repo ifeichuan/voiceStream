@@ -13,6 +13,7 @@ interface HotkeySessionEvent {
   state: string;
   message: string;
   shortcut: string;
+  purpose: string;
 }
 
 interface SttTranscriptEvent {
@@ -80,14 +81,57 @@ interface TimingEvent {
   details: string;
 }
 
-type NavKey = "overview" | "speech" | "pi" | "activity";
+interface AgentTaskEvent {
+  timestamp_ms: number;
+  kind: string;
+  message: string;
+}
+
+interface AgentTask {
+  id: string;
+  title: string;
+  transcript: string;
+  status: "pending" | "running" | "completed" | "failed" | "interrupted" | "unknown";
+  created_at_ms: number;
+  updated_at_ms: number;
+  session_path: string;
+  events: AgentTaskEvent[];
+  final_text: string;
+  error_text: string;
+}
+
+interface AgentTaskUpdatedEvent {
+  task: AgentTask;
+}
+
+interface AgentSessionEntry {
+  line: number;
+  timestamp: string;
+  entry_type: string;
+  role: string;
+  title: string;
+  text: string;
+  tool_name: string;
+  is_error: boolean;
+  raw: string;
+}
+
+interface AgentSessionView {
+  task_id: string;
+  session_path: string;
+  resume_command: string;
+  entries: AgentSessionEntry[];
+  parse_errors: string[];
+}
+
+type NavKey = "overview" | "speech" | "pi" | "agent" | "activity";
 
 const MAX_LOGS = 12;
 const DEFAULT_SHORTCUT = "Cmd+Shift+Space";
+const DEFAULT_AGENT_SHORTCUT = "Cmd+Shift+A";
 const PI_MODES = [
   { value: "dictation-fast", label: "快速整理" },
   { value: "dictation-voice", label: "语音反馈" },
-  { value: "agent", label: "Agent 会话" },
 ];
 const PROMPT_TEMPLATES = [
   { value: "default", label: "默认 · 最小整理" },
@@ -103,6 +147,7 @@ const NAV_ITEMS: Array<{ key: NavKey; label: string; meta: string }> = [
   { key: "overview", label: "概览", meta: "总览" },
   { key: "speech", label: "语音识别", meta: "识别" },
   { key: "pi", label: "Pi", meta: "模型与映射" },
+  { key: "agent", label: "Agent", meta: "任务" },
   { key: "activity", label: "活动", meta: "日志" },
 ];
 
@@ -128,10 +173,29 @@ const statCardClass = "border-b border-paper-line pb-[18px]";
 const metaCardClass = "border-b border-paper-line pb-[18px]";
 const rowClass =
   "flex items-baseline justify-between gap-4 border-b border-paper-line py-3.5 max-[760px]:flex-col max-[760px]:items-start";
+const sessionEntryClass =
+  "grid gap-2.5 border-b border-paper-line py-4 first:pt-0";
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function normalizePiMode(mode: string) {
+  return PI_MODES.some((option) => option.value === mode) ? mode : "dictation-fast";
+}
+
+function formatSessionTime(value: string) {
+  if (!value) return "";
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric) && numeric > 1000000000000 ? new Date(numeric) : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString();
+}
+
+function compactAgentPrompt(text: string) {
+  const match = text.match(/<task>\s*([\s\S]*?)\s*<\/task>/);
+  return (match?.[1] ?? text).trim();
 }
 
 function App() {
@@ -144,9 +208,12 @@ function App() {
   const [finalTranscript, setFinalTranscript] = useState<string[]>([]);
   const [hotkeyStatus, setHotkeyStatus] = useState<HotkeySessionEvent>({
     state: "idle",
-    message: `Press ${DEFAULT_SHORTCUT} to start`,
+    message: `Press ${DEFAULT_SHORTCUT} for dictation or ${DEFAULT_AGENT_SHORTCUT} for Agent`,
     shortcut: DEFAULT_SHORTCUT,
+    purpose: "dictation",
   });
+  const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+  const [selectedAgentTaskId, setSelectedAgentTaskId] = useState<string>("");
   const [sttSettings, setSttSettings] = useState<SttSettingsView>({
     provider: "aliyun-bailian",
     api_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
@@ -176,6 +243,10 @@ function App() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [settingsStatus, setSettingsStatus] = useState("未保存");
   const [isTestingSettings, setIsTestingSettings] = useState(false);
+  const [agentSession, setAgentSession] = useState<AgentSessionView | null>(null);
+  const [agentSessionStatus, setAgentSessionStatus] = useState("选择任务后读取本地 session。");
+  const [continueMessage, setContinueMessage] = useState("");
+  const [isContinuingAgent, setIsContinuingAgent] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
 
   const addLog = (message: string) => {
@@ -199,19 +270,43 @@ function App() {
     [localPi.providers, piSettings.provider],
   );
 
+  const selectedAgentTask = useMemo(
+    () => agentTasks.find((task) => task.id === selectedAgentTaskId) ?? agentTasks[0],
+    [agentTasks, selectedAgentTaskId],
+  );
+  const renderedSessionEntries = useMemo(
+    () =>
+      (agentSession?.entries ?? []).filter(
+        (entry) =>
+          entry.entry_type === "message" ||
+          entry.entry_type === "session_info" ||
+          entry.entry_type === "model_change" ||
+          entry.entry_type === "thinking_level_change",
+      ),
+    [agentSession],
+  );
+
   useEffect(() => {
     let unlistenAudio: (() => void) | undefined;
     let unlistenStt: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
     let unlistenHotkey: (() => void) | undefined;
     let unlistenTiming: (() => void) | undefined;
+    let unlistenAgentTask: (() => void) | undefined;
 
     addLog("Ready");
+
+    void invoke<AgentTask[]>("get_agent_tasks")
+      .then((tasks) => {
+        setAgentTasks(tasks);
+        setSelectedAgentTaskId((prev) => prev || tasks[0]?.id || "");
+      })
+      .catch((error) => addLog(`Load agent tasks failed: ${getErrorMessage(error)}`));
 
     void invoke<AppSettingsView>("get_app_settings")
       .then((settings) => {
         setSttSettings(settings.stt);
-        setPiSettings(settings.pi);
+        setPiSettings({ ...settings.pi, mode: normalizePiMode(settings.pi.mode) });
         setLocalPi(settings.local_pi);
         setSettingsStatus(settings.stt.has_api_key ? "已保存到本地" : "未配置 API Key");
       })
@@ -260,14 +355,57 @@ function App() {
       unlistenTiming = dispose;
     });
 
+    void listen<AgentTaskUpdatedEvent>("agent-task-updated", (event) => {
+      const task = event.payload.task;
+      setAgentTasks((prev) => {
+        const rest = prev.filter((item) => item.id !== task.id);
+        return [task, ...rest].sort((a, b) => b.created_at_ms - a.created_at_ms);
+      });
+      setSelectedAgentTaskId((prev) => prev || task.id);
+      addLog(`Agent ${task.status}: ${task.title}`);
+    }).then((dispose) => {
+      unlistenAgentTask = dispose;
+    });
+
     return () => {
       unlistenAudio?.();
       unlistenStt?.();
       unlistenStatus?.();
       unlistenHotkey?.();
       unlistenTiming?.();
+      unlistenAgentTask?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedAgentTask?.id) {
+      setAgentSession(null);
+      setAgentSessionStatus("选择任务后读取本地 session。");
+      return;
+    }
+
+    let cancelled = false;
+    setAgentSessionStatus("正在读取 session...");
+    void invoke<AgentSessionView>("get_agent_session", { taskId: selectedAgentTask.id })
+      .then((session) => {
+        if (cancelled) return;
+        setAgentSession(session);
+        setAgentSessionStatus(
+          session.entries.length > 0
+            ? `已渲染 ${session.entries.length} 条 JSONL 记录。`
+            : "这个 session 文件还没有可渲染内容。",
+        );
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAgentSession(null);
+        setAgentSessionStatus(`读取 session 失败：${getErrorMessage(error)}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAgentTask?.id, selectedAgentTask?.updated_at_ms]);
 
   const startRecording = async () => {
     try {
@@ -314,7 +452,7 @@ function App() {
             workspace_id: sttSettings.workspace_id,
           },
           pi: {
-            mode: piSettings.mode,
+            mode: normalizePiMode(piSettings.mode),
             provider: piSettings.provider,
             model: piSettings.model,
             reuse_process: piSettings.reuse_process,
@@ -325,7 +463,7 @@ function App() {
         },
       });
       setSttSettings(saved.stt);
-      setPiSettings(saved.pi);
+      setPiSettings({ ...saved.pi, mode: normalizePiMode(saved.pi.mode) });
       setLocalPi(saved.local_pi);
       setApiKeyInput("");
       setSettingsStatus("已保存到本地");
@@ -357,6 +495,58 @@ function App() {
       addLog(`测试设置失败：${message}`);
     } finally {
       setIsTestingSettings(false);
+    }
+  };
+
+  const refreshAgentSession = async () => {
+    if (!selectedAgentTask) return;
+
+    setAgentSessionStatus("正在刷新 session...");
+    try {
+      const session = await invoke<AgentSessionView>("get_agent_session", { taskId: selectedAgentTask.id });
+      setAgentSession(session);
+      setAgentSessionStatus(
+        session.entries.length > 0
+          ? `已渲染 ${session.entries.length} 条 JSONL 记录。`
+          : "这个 session 文件还没有可渲染内容。",
+      );
+    } catch (error) {
+      setAgentSessionStatus(`刷新 session 失败：${getErrorMessage(error)}`);
+    }
+  };
+
+  const submitAgentContinue = async () => {
+    if (!selectedAgentTask) return;
+
+    const message = continueMessage.trim();
+    if (!message) {
+      setAgentSessionStatus("继续内容不能为空。");
+      return;
+    }
+
+    setIsContinuingAgent(true);
+    setAgentSessionStatus("正在继续会话...");
+    try {
+      await invoke<string>("continue_agent_task", {
+        taskId: selectedAgentTask.id,
+        message,
+      });
+      setContinueMessage("");
+      await refreshAgentSession();
+    } catch (error) {
+      setAgentSessionStatus(`继续会话失败：${getErrorMessage(error)}`);
+    } finally {
+      setIsContinuingAgent(false);
+    }
+  };
+
+  const copyResumeCommand = async () => {
+    if (!agentSession?.resume_command) return;
+    try {
+      await navigator.clipboard.writeText(agentSession.resume_command);
+      setAgentSessionStatus("已复制恢复指令。");
+    } catch (error) {
+      setAgentSessionStatus(`复制失败：${getErrorMessage(error)}`);
     }
   };
 
@@ -405,6 +595,24 @@ function App() {
   };
 
   const statusTone = hotkeyStatus.state === "recording" ? "recording" : "idle";
+  const formatTaskTime = (timestamp: number) =>
+    timestamp ? new Date(timestamp).toLocaleString() : "未知时间";
+  const statusLabel = (status: AgentTask["status"]) => {
+    switch (status) {
+      case "pending":
+        return "等待中";
+      case "running":
+        return "执行中";
+      case "completed":
+        return "已完成";
+      case "failed":
+        return "失败";
+      case "interrupted":
+        return "已中断";
+      default:
+        return "未知";
+    }
+  };
 
   return (
     <main className="grid h-screen grid-cols-[248px_minmax(0,1fr)] bg-paper-surface max-[760px]:grid-cols-[220px_minmax(0,1fr)]">
@@ -454,7 +662,10 @@ function App() {
           />
           <div>
             <strong className="block text-[0.95rem] font-semibold">{hotkeyStatus.shortcut}</strong>
-            <p className="mt-1 text-paper-muted [line-height:1.45]">{hotkeyStatus.message}</p>
+            <p className="mt-1 text-paper-muted [line-height:1.45]">
+              {hotkeyStatus.purpose === "agent" ? "Agent · " : "Dictation · "}
+              {hotkeyStatus.message}
+            </p>
           </div>
         </div>
       </aside>
@@ -876,6 +1087,188 @@ function App() {
                   <span className={fieldLabelClass}>~/.pi/agent/models.json（只读）</span>
                   <textarea className={textareaClass} rows={14} value={localPi.raw_models_json} readOnly />
                 </label>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeNav === "agent" && (
+          <div className="grid gap-[34px] pt-7">
+            <section className="grid grid-cols-[minmax(250px,0.52fr)_minmax(0,1.48fr)] gap-8 max-[960px]:grid-cols-1">
+              <div className={sectionClass}>
+                <div className={sectionHeadClass}>
+                  <div>
+                    <h3 className={sectionTitleClass}>Agent 任务</h3>
+                    <p className={`mt-1.5 ${mutedClass}`}>按 {DEFAULT_AGENT_SHORTCUT} 录音创建后台任务。</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3">
+                  {agentTasks.length === 0 && <div className="text-paper-muted">暂无 Agent 任务。</div>}
+                  {agentTasks.map((task) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={[
+                        "grid w-full gap-2 border-b border-paper-line bg-transparent py-4 text-left transition duration-150 hover:-translate-y-px",
+                        selectedAgentTask?.id === task.id ? "text-paper-accent" : "",
+                      ].join(" ")}
+                      onClick={() => setSelectedAgentTaskId(task.id)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <strong className="break-words text-base font-semibold [line-height:1.35]">{task.title}</strong>
+                        <span className="shrink-0 text-[0.78rem] text-paper-muted">{statusLabel(task.status)}</span>
+                      </div>
+                      <small className="text-paper-muted">{formatTaskTime(task.created_at_ms)}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className={sectionClass}>
+                <div className={`${sectionHeadClass} max-[760px]:flex-col max-[760px]:items-start`}>
+                  <div>
+                    <h3 className={sectionTitleClass}>会话</h3>
+                    <p className={`mt-1.5 ${mutedClass}`}>{agentSessionStatus}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2.5">
+                    <button className={ghostButtonClass} type="button" onClick={refreshAgentSession} disabled={!selectedAgentTask}>
+                      刷新
+                    </button>
+                    <button className={ghostButtonClass} type="button" onClick={copyResumeCommand} disabled={!agentSession?.resume_command}>
+                      复制恢复指令
+                    </button>
+                  </div>
+                </div>
+
+                {!selectedAgentTask && <div className="text-paper-muted">选择一个任务查看会话。</div>}
+                {selectedAgentTask && (
+                  <div className="grid gap-7">
+                    <div className="grid grid-cols-3 gap-5 max-[900px]:grid-cols-1">
+                      <article className={metaCardClass}>
+                        <span className={fieldLabelClass}>状态</span>
+                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
+                          {statusLabel(selectedAgentTask.status)}
+                        </strong>
+                      </article>
+                      <article className={metaCardClass}>
+                        <span className={fieldLabelClass}>会话记录</span>
+                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
+                          {agentSession?.entries.length ?? 0}
+                        </strong>
+                      </article>
+                      <article className={metaCardClass}>
+                        <span className={fieldLabelClass}>执行事件</span>
+                        <strong className="mt-3 block text-[1.25rem] font-semibold tracking-[-0.045em]">
+                          {selectedAgentTask.events.length}
+                        </strong>
+                      </article>
+                    </div>
+
+                    <section>
+                      <div className="mb-3 flex items-end justify-between gap-4 max-[760px]:flex-col max-[760px]:items-start">
+                        <div>
+                          <span className={fieldLabelClass}>渲染结果</span>
+                          <p className={`mt-1.5 ${mutedClass}`}>从本地 JSONL 读取，不走外部 Web UI。</p>
+                        </div>
+                        {agentSession?.parse_errors.length ? (
+                          <span className="text-[0.78rem] text-[oklch(0.56_0.2_28)]">
+                            {agentSession.parse_errors.length} 条解析失败
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="max-h-[560px] overflow-auto border-y border-paper-line py-4 pr-2 [scrollbar-gutter:stable]">
+                        {renderedSessionEntries.length === 0 && (
+                          <div className="py-8 text-paper-muted">还没有可渲染的对话内容。</div>
+                        )}
+                        {renderedSessionEntries.map((entry) => {
+                          const displayText = entry.role === "user" ? compactAgentPrompt(entry.text) : entry.text;
+                          const roleClass =
+                            entry.role === "assistant"
+                              ? "text-paper-ink"
+                              : entry.role === "user"
+                                ? "text-paper-accent"
+                                : entry.is_error
+                                  ? "text-[oklch(0.56_0.2_28)]"
+                                  : "text-paper-muted";
+                          return (
+                            <article key={`${entry.line}-${entry.entry_type}`} className={sessionEntryClass}>
+                              <div className="flex items-baseline justify-between gap-4">
+                                <div className="flex flex-wrap items-baseline gap-2">
+                                  <strong className={["text-[0.95rem] font-semibold", roleClass].join(" ")}>
+                                    {entry.tool_name ? `${entry.title} · ${entry.tool_name}` : entry.title}
+                                  </strong>
+                                  <span className="font-mono text-[0.72rem] text-paper-muted">L{entry.line}</span>
+                                </div>
+                                {entry.timestamp && (
+                                  <span className="shrink-0 text-[0.76rem] text-paper-muted">
+                                    {formatSessionTime(entry.timestamp)}
+                                  </span>
+                                )}
+                              </div>
+                              <pre className="whitespace-pre-wrap break-words font-inherit text-[0.92rem] [line-height:1.7]">
+                                {displayText}
+                              </pre>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+
+                    <section>
+                      <span className={fieldLabelClass}>继续会话</span>
+                      <textarea
+                        className={`${textareaClass} mt-3 min-h-[118px] font-inherit`}
+                        value={continueMessage}
+                        onChange={(event) => setContinueMessage(event.target.value)}
+                        placeholder="给这个 Agent session 追加下一条指令..."
+                        disabled={selectedAgentTask.status === "running" || isContinuingAgent}
+                      />
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                        <small className={mutedClass}>
+                          使用同一个 session 文件继续：{selectedAgentTask.session_path}
+                        </small>
+                        <button
+                          className={primaryButtonClass}
+                          type="button"
+                          onClick={submitAgentContinue}
+                          disabled={selectedAgentTask.status === "running" || isContinuingAgent || !continueMessage.trim()}
+                        >
+                          {isContinuingAgent ? "发送中..." : "发送继续指令"}
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="grid gap-3">
+                      <span className={fieldLabelClass}>恢复指令</span>
+                      <code className="block break-all border-b border-paper-line pb-4 font-mono text-[0.82rem] text-paper-muted">
+                        {agentSession?.resume_command || "pi --session <session-path>"}
+                      </code>
+                    </section>
+
+                    <details>
+                      <summary className="cursor-pointer text-[0.86rem] font-semibold text-paper-muted">执行日志</summary>
+                      <div className="mt-3 max-h-56 overflow-auto border-y border-paper-line py-3 font-mono text-[0.82rem] [line-height:1.65]">
+                        {selectedAgentTask.events.map((event, index) => (
+                          <div key={`${event.timestamp_ms}-${event.kind}-${index}`} className="mt-2 first:mt-0">
+                            <span className="text-paper-muted">{new Date(event.timestamp_ms).toLocaleTimeString()}</span>{" "}
+                            <strong>{event.kind}</strong> · {event.message}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+
+                    {selectedAgentTask.error_text && (
+                      <section>
+                        <span className={fieldLabelClass}>错误</span>
+                        <div className="mt-3 whitespace-pre-wrap border-b border-paper-line pb-4 text-[oklch(0.56_0.2_28)] [line-height:1.7]">
+                          {selectedAgentTask.error_text}
+                        </div>
+                      </section>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           </div>
