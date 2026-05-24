@@ -32,6 +32,7 @@ base64 = "0.22"
 url = "2"
 native-tls = "0.2"
 tokio-native-tls = "0.3"
+core-graphics = { version = "0.25.0", features = ["default"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["std"] }

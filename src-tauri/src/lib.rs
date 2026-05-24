@@ -972,17 +972,25 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
 
 
 fn trigger_cmd_v() -> Result<(), String> {
-    let status = Command::new("osascript")
-        .arg("-e")
-        .arg(r#"tell application "System Events" to keystroke "v" using command down"#)
-        .status()
-        .map_err(|e| format!("Failed to launch osascript: {}", e))?;
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Paste keystroke failed. Grant Accessibility access if needed.".to_string())
-    }
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create CGEventSource. Grant Accessibility access.")?;
+
+    // key code 9 = 'v'
+    let key_down = CGEvent::new_keyboard_event(source.clone(), 9, true)
+        .map_err(|_| "Failed to create key down event")?;
+    let key_up = CGEvent::new_keyboard_event(source, 9, false)
+        .map_err(|_| "Failed to create key up event")?;
+
+    key_down.set_flags(CGEventFlags::CGEventFlagCommand);
+    key_up.set_flags(CGEventFlags::CGEventFlagCommand);
+
+    key_down.post(CGEventTapLocation::HID);
+    key_up.post(CGEventTapLocation::HID);
+
+    Ok(())
 }
 
 fn paste_text_to_cursor(text: &str) -> Result<(), String> {
