@@ -63,6 +63,31 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
     let mut command = CommandBuilder::new(pi_path.as_os_str());
     command.cwd(app_root.as_os_str());
     command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    command.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()));
+
+    if let Ok(home) = std::env::var("HOME") {
+        command.env("HOME", &home);
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let extra_paths = [
+            format!("{}/Library/pnpm", home),
+            format!("{}/.local/bin", home),
+            format!("{}/.bun/bin", home),
+            format!("{}/bin", home),
+            "/usr/local/bin".to_string(),
+            "/opt/homebrew/bin".to_string(),
+        ];
+        let enriched_path = extra_paths
+            .iter()
+            .filter(|p| std::path::Path::new(p.as_str()).is_dir())
+            .chain(std::iter::once(&system_path))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(":");
+        command.env("PATH", enriched_path);
+    }
+
     for arg in args {
         command.arg(arg);
     }

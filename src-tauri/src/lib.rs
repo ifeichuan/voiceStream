@@ -942,6 +942,11 @@ fn play_recorded() -> Result<String, String> {
     ))
 }
 
+#[tauri::command]
+fn copy_to_clipboard(text: String) -> Result<(), String> {
+    write_clipboard_text(&text)
+}
+
 fn write_clipboard_text(text: &str) -> Result<(), String> {
     let mut child = Command::new("pbcopy")
         .stdin(Stdio::piped())
@@ -1605,6 +1610,7 @@ pub fn run() {
             start_recording,
             stop_recording,
             play_recorded,
+            copy_to_clipboard,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

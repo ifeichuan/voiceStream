@@ -363,7 +363,7 @@ export default function Agent() {
   const copyResumeCommand = async () => {
     if (!agentSession?.resume_command) return;
     try {
-      await navigator.clipboard.writeText(agentSession.resume_command);
+      await invoke("copy_to_clipboard", { text: agentSession.resume_command });
       setAgentSessionStatus("已复制恢复指令。");
     } catch (error) {
       setAgentSessionStatus(`复制失败：${getErrorMessage(error)}`);
@@ -447,6 +447,7 @@ export default function Agent() {
           {selectedAgentTask && (
             <div ref={terminalShellRef} className="relative min-h-0 flex-1 overflow-hidden">
               <XTermContainer
+                
                 key={`${selectedAgentTask.id}-${terminalResetKey}`}
                 taskId={selectedAgentTask.id}
                 xtermRef={xtermRef}
@@ -685,7 +686,7 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
       rows: AGENT_TERMINAL_ROWS,
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: "var(--font-mono)",
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "Menlo, Consolas, monospace",
       theme: getXtermTheme(),
       allowProposedApi: true,
     });
@@ -725,9 +726,7 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
                 taskId,
                 cols: term.cols,
                 rows: term.rows,
-              }).catch((error) => {
-                callbacksRef.current.setAgentTerminalStatus(`调整终端尺寸失败：${getErrorMessage(error)}`);
-              });
+              }).catch(() => {});
             }
           }
         });
