@@ -148,112 +148,19 @@
   }
 }
 
-/* Overview breathing animations */
-@keyframes ring-breathe {
-  0%, 100% { transform: scale(1); opacity: 0.5; }
-  50% { transform: scale(1.04); opacity: 0.8; }
-}
 
-@keyframes ring-breathe-inner {
-  0%, 100% { transform: scale(1); opacity: 0.3; }
-  50% { transform: scale(1.06); opacity: 0.6; }
-}
-
-@keyframes ring-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.08); opacity: 0.7; }
-}
-
-@keyframes ring-pulse-inner {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.12); opacity: 1; }
-}
-
-.overview-ring-idle {
-  transform-origin: center;
-  animation: ring-breathe 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
-}
-
-.overview-ring-idle-inner {
-  transform-origin: center;
-  animation: ring-breathe-inner 4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
-  animation-delay: 0.5s;
-}
-
-.overview-ring-active {
-  transform-origin: center;
-  animation: ring-pulse 1.5s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
-}
-
-.overview-ring-active-inner {
-  transform-origin: center;
-  animation: ring-pulse-inner 1.2s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .overview-ring-idle,
-  .overview-ring-idle-inner,
-  .overview-ring-active,
-  .overview-ring-active-inner {
-    animation: none;
-  }
-}
-
-.agent-terminal.wterm {
-  --term-bg: #f9f8f8;
-  --term-fg: #201d1d;
-  --term-cursor: #4a4444;
-  --term-color-0: #2a2626;
-  --term-color-1: #c43d37;
-  --term-color-2: #3a8c2e;
-  --term-color-3: #8a7a2e;
-  --term-color-4: #3366cc;
-  --term-color-5: #8844aa;
-  --term-color-6: #2e8a8a;
-  --term-color-7: #e6e3e3;
-  --term-color-8: #7a7575;
-  --term-color-9: #e05550;
-  --term-color-10: #4caa3e;
-  --term-color-11: #b8a83e;
-  --term-color-12: #5588ee;
-  --term-color-13: #aa66cc;
-  --term-color-14: #44aaaa;
-  --term-color-15: #fdfcfc;
-  --term-font-family: var(--font-mono);
-  --term-font-size: 12.5px;
-  --term-row-height: 18px;
-
-  width: 100%;
-  height: 100% !important;
-  min-height: 0;
+.agent-terminal {
   border: 1px solid var(--color-paper-line);
   border-radius: 0;
-  box-shadow: none;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
-@media (prefers-color-scheme: dark) {
-  .agent-terminal.wterm {
-    --term-bg: #2a2626;
-    --term-fg: #fdfcfc;
-    --term-cursor: #c8a050;
-    --term-color-0: #2a2626;
-    --term-color-1: #e06560;
-    --term-color-2: #6abf5a;
-    --term-color-3: #c8b84a;
-    --term-color-4: #6699dd;
-    --term-color-5: #bb88dd;
-    --term-color-6: #55bbbb;
-    --term-color-7: #e6e3e3;
-    --term-color-8: #7a7575;
-    --term-color-9: #f07870;
-    --term-color-10: #7ad06a;
-    --term-color-11: #ddd05a;
-    --term-color-12: #88bbff;
-    --term-color-13: #cc99ee;
-    --term-color-14: #66cccc;
-    --term-color-15: #fdfcfc;
-  }
+.agent-terminal .xterm {
+  height: 100%;
+  padding: 8px 0 8px 12px;
+}
+
+.agent-terminal .xterm-viewport {
+  scrollbar-gutter: stable;
 }
 

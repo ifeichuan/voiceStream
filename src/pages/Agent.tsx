@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Terminal, useTerminal } from "@wterm/react";
-import "@wterm/react/css";
+import { Terminal as XTerm } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import "@xterm/xterm/css/xterm.css";
 import {
   AGENT_TERMINAL_BOTTOM_THRESHOLD,
   AGENT_TERMINAL_COLS,
@@ -16,9 +18,7 @@ import { useSettingsStore } from "../stores/settings";
 import type { AgentSessionView, AgentTerminalOutputEvent, AgentTerminalStatusEvent } from "../types";
 
 export default function Agent() {
-  const terminal = useTerminal();
-  const terminalWriteRef = useRef(terminal.write);
-  const terminalFocusRef = useRef(terminal.focus);
+  const xtermRef = useRef<XTerm | null>(null);
   const terminalShellRef = useRef<HTMLDivElement | null>(null);
   const agentTerminalAtBottomRef = useRef(true);
   const agentTerminalReadyRef = useRef(false);
@@ -108,17 +108,17 @@ export default function Agent() {
     [clearAgentTerminalLoadTimeout, setAgentTerminalStatus, setIsAgentTerminalLoading],
   );
 
-  const getAgentTerminalNode = useCallback(
-    () => terminalShellRef.current?.querySelector<HTMLElement>(".agent-terminal.wterm") ?? null,
+  const getAgentTerminalViewport = useCallback(
+    () => terminalShellRef.current?.querySelector<HTMLElement>(".xterm-viewport") ?? null,
     [],
   );
 
   const isAgentTerminalNearBottom = useCallback(() => {
-    const terminalNode = getAgentTerminalNode();
-    if (!terminalNode) return true;
-    const distanceToBottom = terminalNode.scrollHeight - terminalNode.scrollTop - terminalNode.clientHeight;
+    const viewport = getAgentTerminalViewport();
+    if (!viewport) return true;
+    const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
     return distanceToBottom <= AGENT_TERMINAL_BOTTOM_THRESHOLD;
-  }, [getAgentTerminalNode]);
+  }, [getAgentTerminalViewport]);
 
   const syncAgentTerminalScrollState = useCallback(() => {
     const isAtBottom = isAgentTerminalNearBottom();
@@ -144,7 +144,7 @@ export default function Agent() {
       hasAgentTerminalPendingOutputRef.current = false;
       setHasAgentTerminalPendingOutput(false);
     }
-    terminalWriteRef.current("\x1b[3J\x1b[H\x1b[2J");
+    xtermRef.current?.clear();
   }, [setHasAgentTerminalPendingOutput, setIsAgentTerminalAtBottom, setTerminalResetKey]);
 
   const scrollAgentTerminalToBottom = useCallback(() => {
@@ -152,9 +152,9 @@ export default function Agent() {
 
     scrollAgentTerminalFrameRef.current = requestAnimationFrame(() => {
       scrollAgentTerminalFrameRef.current = null;
-      const terminalNode = getAgentTerminalNode();
-      if (!terminalNode) return;
-      terminalNode.scrollTop = terminalNode.scrollHeight;
+      const term = xtermRef.current;
+      if (!term) return;
+      term.scrollToBottom();
       if (!agentTerminalAtBottomRef.current) {
         agentTerminalAtBottomRef.current = true;
         setIsAgentTerminalAtBottom(true);
@@ -164,15 +164,17 @@ export default function Agent() {
         setHasAgentTerminalPendingOutput(false);
       }
     });
-  }, [getAgentTerminalNode, setHasAgentTerminalPendingOutput, setIsAgentTerminalAtBottom]);
+  }, [setHasAgentTerminalPendingOutput, setIsAgentTerminalAtBottom]);
 
   const flushPendingAgentTerminalOutput = useCallback(() => {
     if (!agentTerminalReadyRef.current || pendingAgentTerminalOutputRef.current.length === 0) {
       return false;
     }
 
+    const term = xtermRef.current;
+    if (!term) return false;
     for (const chunk of pendingAgentTerminalOutputRef.current) {
-      terminalWriteRef.current(chunk);
+      term.write(chunk);
     }
     pendingAgentTerminalOutputRef.current = [];
     finishAgentTerminalLoading();
@@ -185,11 +187,6 @@ export default function Agent() {
   }, [selectedAgentTask?.id]);
 
   useEffect(() => {
-    terminalWriteRef.current = terminal.write;
-    terminalFocusRef.current = terminal.focus;
-  }, [terminal.write, terminal.focus]);
-
-  useEffect(() => {
     let unlistenAgentTerminalOutput: (() => void) | undefined;
     let unlistenAgentTerminalStatus: (() => void) | undefined;
 
@@ -198,9 +195,13 @@ export default function Agent() {
       if (task_id !== selectedAgentTaskIdRef.current) return;
       const shouldFollowOutput = agentTerminalAtBottomRef.current;
       const chunk = new Uint8Array(data);
-      if (agentTerminalReadyRef.current) {
-        terminalWriteRef.current(chunk);
-        finishAgentTerminalLoading();
+      if (agentTerminalReadyRef.current && xtermRef.current) {
+        xtermRef.current.write(chunk, () => {
+          finishAgentTerminalLoading();
+          if (shouldFollowOutput) {
+            xtermRef.current?.scrollToBottom();
+          }
+        });
       } else {
         pendingAgentTerminalOutputRef.current.push(chunk);
       }
@@ -276,7 +277,7 @@ export default function Agent() {
       .then(() => {
         if (cancelled) return;
         setAgentTerminalStatus("PTY 已连接。");
-        terminalFocusRef.current();
+        xtermRef.current?.focus();
         scrollAgentTerminalToBottom();
       })
       .catch((error) => {
@@ -339,7 +340,7 @@ export default function Agent() {
       });
       if (selectedAgentTaskIdRef.current !== taskId) return;
       setAgentTerminalStatus("PTY 已连接。");
-      terminalFocusRef.current();
+      xtermRef.current?.focus();
       scrollAgentTerminalToBottom();
 
       const session = await invoke<AgentSessionView>("get_agent_session", { taskId });
@@ -445,34 +446,14 @@ export default function Agent() {
           {!selectedAgentTask && <div className="text-paper-muted">选择一个任务查看会话。</div>}
           {selectedAgentTask && (
             <div ref={terminalShellRef} className="relative min-h-0 flex-1 overflow-hidden">
-              <Terminal
+              <XTermContainer
                 key={`${selectedAgentTask.id}-${terminalResetKey}`}
-                ref={terminal.ref}
-                className="agent-terminal"
-                cols={AGENT_TERMINAL_COLS}
-                rows={AGENT_TERMINAL_ROWS}
-                cursorBlink
-                onData={(data) => {
-                  void invoke("write_agent_terminal", {
-                    taskId: selectedAgentTask.id,
-                    data,
-                  }).catch((error) => {
-                    setAgentTerminalStatus(`写入失败：${getErrorMessage(error)}`);
-                  });
-                }}
-                onResize={(cols, rows) => {
-                  void invoke("resize_agent_terminal", {
-                    taskId: selectedAgentTask.id,
-                    cols,
-                    rows,
-                  }).catch((error) => {
-                    setAgentTerminalStatus(`调整终端尺寸失败：${getErrorMessage(error)}`);
-                  });
-                }}
+                taskId={selectedAgentTask.id}
+                xtermRef={xtermRef}
                 onReady={() => {
                   agentTerminalReadyRef.current = true;
                   flushPendingAgentTerminalOutput();
-                  terminalFocusRef.current();
+                  xtermRef.current?.focus();
                   scrollAgentTerminalToBottom();
                 }}
                 onScroll={syncAgentTerminalScrollState}
@@ -480,6 +461,7 @@ export default function Agent() {
                   finishAgentTerminalLoading();
                   setAgentTerminalStatus(`终端初始化失败：${getErrorMessage(error)}`);
                 }}
+                setAgentTerminalStatus={setAgentTerminalStatus}
               />
               {isAgentTerminalLoading && (
                 <div
@@ -623,5 +605,167 @@ export default function Agent() {
         </div>
       )}
     </div>
+  );
+}
+
+const XTERM_LIGHT_THEME = {
+  background: "#f9f8f8",
+  foreground: "#201d1d",
+  cursor: "#4a4444",
+  cursorAccent: "#f9f8f8",
+  selectionBackground: "#007aff33",
+  black: "#2a2626",
+  red: "#c43d37",
+  green: "#3a8c2e",
+  yellow: "#8a7a2e",
+  blue: "#3366cc",
+  magenta: "#8844aa",
+  cyan: "#2e8a8a",
+  white: "#e6e3e3",
+  brightBlack: "#7a7575",
+  brightRed: "#e05550",
+  brightGreen: "#4caa3e",
+  brightYellow: "#b8a83e",
+  brightBlue: "#5588ee",
+  brightMagenta: "#aa66cc",
+  brightCyan: "#44aaaa",
+  brightWhite: "#fdfcfc",
+};
+
+const XTERM_DARK_THEME = {
+  background: "#2a2626",
+  foreground: "#fdfcfc",
+  cursor: "#c8a050",
+  cursorAccent: "#2a2626",
+  selectionBackground: "#007aff44",
+  black: "#2a2626",
+  red: "#e06560",
+  green: "#6abf5a",
+  yellow: "#c8b84a",
+  blue: "#6699dd",
+  magenta: "#bb88dd",
+  cyan: "#55bbbb",
+  white: "#e6e3e3",
+  brightBlack: "#7a7575",
+  brightRed: "#f07870",
+  brightGreen: "#7ad06a",
+  brightYellow: "#ddd05a",
+  brightBlue: "#88bbff",
+  brightMagenta: "#cc99ee",
+  brightCyan: "#66cccc",
+  brightWhite: "#fdfcfc",
+};
+
+function getXtermTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? XTERM_DARK_THEME
+    : XTERM_LIGHT_THEME;
+}
+
+interface XTermContainerProps {
+  taskId: string;
+  xtermRef: React.MutableRefObject<XTerm | null>;
+  onReady: () => void;
+  onScroll: () => void;
+  onError: (error: unknown) => void;
+  setAgentTerminalStatus: (status: string) => void;
+}
+
+function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgentTerminalStatus }: XTermContainerProps) {
+  const containerElRef = useRef<HTMLDivElement | null>(null);
+  const callbacksRef = useRef({ onReady, onScroll, onError, setAgentTerminalStatus });
+  callbacksRef.current = { onReady, onScroll, onError, setAgentTerminalStatus };
+
+  useEffect(() => {
+    const el = containerElRef.current;
+    if (!el) return;
+
+    const term = new XTerm({
+      cols: AGENT_TERMINAL_COLS,
+      rows: AGENT_TERMINAL_ROWS,
+      cursorBlink: true,
+      scrollback: 5000,
+      fontFamily: "var(--font-mono)",
+      theme: getXtermTheme(),
+      allowProposedApi: true,
+    });
+
+    const fitAddon = new FitAddon();
+    const unicode11Addon = new Unicode11Addon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(unicode11Addon);
+    term.unicode.activeVersion = "11";
+
+    try {
+      term.open(el);
+      xtermRef.current = term;
+
+      term.onData((data) => {
+        void invoke("write_agent_terminal", { taskId, data }).catch((error) => {
+          callbacksRef.current.setAgentTerminalStatus(`写入失败：${getErrorMessage(error)}`);
+        });
+      });
+
+      term.onScroll(() => callbacksRef.current.onScroll());
+
+      const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const onThemeChange = () => { term.options.theme = getXtermTheme(); };
+      themeQuery.addEventListener("change", onThemeChange);
+
+      let fitRaf = 0;
+      const doFit = () => {
+        if (fitRaf) return;
+        fitRaf = requestAnimationFrame(() => {
+          fitRaf = 0;
+          if (el.clientWidth > 0 && el.clientHeight > 0) {
+            const dims = fitAddon.proposeDimensions();
+            if (dims && dims.cols > 0 && dims.rows > 0) {
+              fitAddon.fit();
+              void invoke("resize_agent_terminal", {
+                taskId,
+                cols: term.cols,
+                rows: term.rows,
+              }).catch((error) => {
+                callbacksRef.current.setAgentTerminalStatus(`调整终端尺寸失败：${getErrorMessage(error)}`);
+              });
+            }
+          }
+        });
+      };
+
+      const resizeObserver = new ResizeObserver(doFit);
+      resizeObserver.observe(el);
+
+      callbacksRef.current.onReady();
+
+      return () => {
+        resizeObserver.disconnect();
+        if (fitRaf) cancelAnimationFrame(fitRaf);
+        themeQuery.removeEventListener("change", onThemeChange);
+        term.dispose();
+        if (xtermRef.current === term) {
+          xtermRef.current = null;
+        }
+      };
+    } catch (err) {
+      callbacksRef.current.onError(err);
+      return () => {
+        term.dispose();
+        if (xtermRef.current === term) {
+          xtermRef.current = null;
+        }
+      };
+    }
+  }, [taskId, xtermRef]);
+
+  return (
+    <div
+      ref={containerElRef}
+      className="agent-terminal absolute inset-0"
+      role="textbox"
+      aria-label="Terminal"
+      aria-multiline="true"
+      aria-roledescription="terminal"
+    />
   );
 }
