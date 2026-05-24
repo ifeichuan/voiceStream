@@ -726,24 +726,44 @@ fn resolve_app_root() -> Result<PathBuf, String> {
                 // .app/Contents/Resources — where Tauri puts bundled resources
                 candidates.push(grandparent.join("Resources"));
                 candidates.push(grandparent.to_path_buf());
+                // Also check one level up from .app (dev scenario)
+                if let Some(great_grandparent) = grandparent.parent() {
+                    candidates.push(great_grandparent.to_path_buf());
+                }
             }
         }
     }
 
-    let cwd = env::current_dir().map_err(|e| format!("failed to resolve current dir: {}", e))?;
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     candidates.push(cwd.clone());
     candidates.push(cwd.join(".."));
 
-    for candidate in candidates {
+    eprintln!("[resolve_app_root] candidates: {:?}", candidates);
+
+    for candidate in &candidates {
         let normalized = candidate.canonicalize().unwrap_or(candidate.clone());
         if normalized.join("pi-extensions").exists()
             || normalized.join("src-tauri/tauri.conf.json").exists()
             || normalized.join("package.json").exists()
         {
+            eprintln!("[resolve_app_root] resolved: {}", normalized.display());
             return Ok(normalized);
         }
     }
 
+    // Last resort: if we're in a .app bundle, Resources is the most likely location
+    if let Ok(current_exe) = env::current_exe() {
+        let resources = current_exe
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("Resources"));
+        if let Some(res) = resources {
+            eprintln!("[resolve_app_root] fallback to Resources: {}", res.display());
+            return Ok(res);
+        }
+    }
+
+    eprintln!("[resolve_app_root] fallback to cwd: {}", cwd.display());
     Ok(cwd)
 }
 

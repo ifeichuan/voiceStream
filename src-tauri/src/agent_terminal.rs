@@ -70,7 +70,7 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
     if let Ok(home) = std::env::var("HOME") {
         command.env("HOME", &home);
         let system_path = std::env::var("PATH").unwrap_or_default();
-        let extra_paths = [
+        let mut extra_paths = vec![
             format!("{}/Library/pnpm", home),
             format!("{}/.local/bin", home),
             format!("{}/.bun/bin", home),
@@ -78,6 +78,35 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
             "/usr/local/bin".to_string(),
             "/opt/homebrew/bin".to_string(),
         ];
+
+        // Resolve fnm/nvm/volta node paths
+        let fnm_dir = format!("{}/.local/share/fnm/node-versions", home);
+        if let Ok(entries) = std::fs::read_dir(&fnm_dir) {
+            if let Some(version) = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .max()
+            {
+                extra_paths.push(format!("{}/installation/bin", version.display()));
+            }
+        }
+
+        let nvm_dir = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            if let Some(version) = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .max()
+            {
+                extra_paths.push(format!("{}/bin", version.display()));
+            }
+        }
+
+        let volta_node = format!("{}/.volta/bin", home);
+        extra_paths.push(volta_node);
+
         let enriched_path = extra_paths
             .iter()
             .filter(|p| std::path::Path::new(p.as_str()).is_dir())
