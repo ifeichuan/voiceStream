@@ -1,6 +1,7 @@
 pub mod assemblyai;
 pub mod deepgram;
 pub mod gladia;
+pub mod local_zipformer;
 pub mod openai;
 pub mod soniox;
 

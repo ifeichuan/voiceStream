@@ -60,6 +60,7 @@ pub const PROVIDER_ASSEMBLYAI: &str = "assemblyai";
 pub const PROVIDER_SONIOX: &str = "soniox";
 pub const PROVIDER_GLADIA: &str = "gladia";
 pub const PROVIDER_OPENAI: &str = "openai";
+pub const PROVIDER_LOCAL_ZIPFORMER: &str = "local-zipformer";
 
 /// List of all known provider IDs for frontend display.
 #[allow(dead_code)]
@@ -70,6 +71,7 @@ pub const KNOWN_PROVIDERS: &[(&str, &str)] = &[
     (PROVIDER_SONIOX, "Soniox"),
     (PROVIDER_GLADIA, "Gladia"),
     (PROVIDER_OPENAI, "OpenAI Realtime"),
+    (PROVIDER_LOCAL_ZIPFORMER, "本地 Zipformer (中英)"),
 ];
 
 /// Metadata about a provider's requirements, used by frontend for adaptive UI.
@@ -153,6 +155,17 @@ pub fn provider_meta_list() -> Vec<SttProviderMeta> {
             default_endpoint: "wss://api.openai.com/v1/realtime".to_string(),
             default_model: "whisper-1".to_string(),
             default_sample_rate: 24_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_LOCAL_ZIPFORMER.to_string(),
+            label: "本地 Zipformer (中英)".to_string(),
+            needs_api_key: false,
+            needs_endpoint: false,
+            needs_model: false,
+            needs_workspace_id: false,
+            default_endpoint: String::new(),
+            default_model: String::new(),
+            default_sample_rate: 16_000,
         },
     ]
 }
@@ -330,13 +343,25 @@ pub async fn test_settings(app: &AppHandle, input: SttSettingsInput) -> Result<S
             )
             .await
         }
+        PROVIDER_LOCAL_ZIPFORMER => {
+            let model_dir = if settings.extra_config.is_empty() {
+                default_local_model_dir()
+            } else {
+                settings.extra_config.clone()
+            };
+            crate::stt_providers::local_zipformer::test_model(&model_dir)
+        }
         other => Err(format!("Provider '{}' does not support connection testing yet", other)),
     }
 }
 
 pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttProvider>>, String> {
     let settings = settings::runtime_stt_settings(&app)?;
-    if settings.api_key.is_empty() {
+
+    // Local providers don't need an API key
+    let is_local = settings.provider == PROVIDER_LOCAL_ZIPFORMER;
+
+    if !is_local && settings.api_key.is_empty() {
         mark_runtime_finished();
         emit_status(
             &app,
@@ -409,6 +434,24 @@ pub fn create_stt_provider(
                     settings.language,
                 ),
             )))
+        }
+        PROVIDER_LOCAL_ZIPFORMER => {
+            let model_dir = if settings.extra_config.is_empty() {
+                default_local_model_dir()
+            } else {
+                settings.extra_config.clone()
+            };
+            match crate::stt_providers::local_zipformer::LocalZipformerSttProvider::new(
+                app.clone(),
+                model_dir,
+            ) {
+                Ok(provider) => Ok(Some(Box::new(provider))),
+                Err(error) => {
+                    mark_runtime_finished();
+                    emit_status(&app, PROVIDER_LOCAL_ZIPFORMER, &format!("error: {}", error));
+                    Err(error)
+                }
+            }
         }
         unknown => {
             mark_runtime_finished();
@@ -785,6 +828,28 @@ async fn send_finish(
         .send(Message::Text(finish_task.to_string().into()))
         .await
         .map_err(|e| format!("finish-task send failed: {}", e))
+}
+
+/// Default model directory for local STT models.
+/// Looks in ~/Library/Application Support/com.voicestream.app/models/
+/// or falls back to ./models/ relative to the app.
+fn default_local_model_dir() -> String {
+    if let Some(dir) = crate::settings::app_data_dir_path() {
+        let models_dir = dir.join("models");
+        if models_dir.exists() {
+            // Find first subdirectory that looks like a zipformer model
+            if let Ok(entries) = std::fs::read_dir(&models_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() && path.join("tokens.txt").exists() {
+                        return path.to_string_lossy().to_string();
+                    }
+                }
+            }
+            return models_dir.to_string_lossy().to_string();
+        }
+    }
+    "models".to_string()
 }
 
 fn emit_status(app: &AppHandle, provider: &str, status: &str) {

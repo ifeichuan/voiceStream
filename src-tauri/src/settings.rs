@@ -192,6 +192,10 @@ pub fn set_app_data_dir(dir: PathBuf) {
     let _ = APP_DATA_DIR.set(normalized);
 }
 
+pub fn app_data_dir_path() -> Option<PathBuf> {
+    APP_DATA_DIR.get().cloned()
+}
+
 pub fn load_app_settings_view(app: &AppHandle) -> Result<AppSettingsView, String> {
     let stored = read_or_migrate_settings(app)?;
     Ok(AppSettingsView {
