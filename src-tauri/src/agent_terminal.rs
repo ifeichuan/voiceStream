@@ -62,7 +62,8 @@ pub fn start(app: AppHandle, task_id: &str, cols: u16, rows: u16) -> Result<(), 
 
     let mut command = CommandBuilder::new(pi_path.as_os_str());
     command.cwd(app_root.as_os_str());
-    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
+    // Allow the voicestream-notify extension to speak summaries in agent terminal mode too.
+    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "1");
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     command.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()));
