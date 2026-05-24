@@ -150,6 +150,8 @@ void main() {
 
 export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, className }: ShaderOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const glRef = useRef<WebGL2RenderingContext | null>(null);
+  const programRef = useRef<WebGLProgram | null>(null);
   const rafRef = useRef<number>(0);
   const startTimeRef = useRef(performance.now());
   const uniformsRef = useRef<Record<string, WebGLUniformLocation | null>>({});
@@ -211,6 +213,8 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
       u_darkMode: gl.getUniformLocation(program, "u_darkMode"),
     };
 
+    glRef.current = gl;
+    programRef.current = program;
     return gl;
   }, []);
 
@@ -239,12 +243,18 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    let lastFrameTime = performance.now();
     const render = () => {
       const u = uniformsRef.current;
-      const elapsed = (performance.now() - startTimeRef.current) / 1000;
+      const now = performance.now();
+      const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+      lastFrameTime = now;
+      const elapsed = (now - startTimeRef.current) / 1000;
 
-      smoothActiveRef.current += ((isActiveRef.current ? 1 : 0) - smoothActiveRef.current) * 0.05;
-      smoothAudioRef.current += (audioLevelRef.current - smoothAudioRef.current) * 0.15;
+      const activeRate = 3.0;
+      const audioRate = 9.0;
+      smoothActiveRef.current += ((isActiveRef.current ? 1 : 0) - smoothActiveRef.current) * (1 - Math.exp(-activeRate * dt));
+      smoothAudioRef.current += (audioLevelRef.current - smoothAudioRef.current) * (1 - Math.exp(-audioRate * dt));
 
       gl.uniform1f(u.iTime!, reducedMotion ? 0 : elapsed);
       gl.uniform1f(u.u_active!, smoothActiveRef.current);
@@ -260,6 +270,9 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
     return () => {
       cancelAnimationFrame(rafRef.current);
       darkQuery.removeEventListener("change", onDarkChange);
+      gl.deleteProgram(programRef.current);
+      programRef.current = null;
+      glRef.current = null;
     };
   }, [size, initGL]);
 

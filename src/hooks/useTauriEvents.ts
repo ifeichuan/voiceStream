@@ -76,9 +76,11 @@ export function useTauriEvents() {
     void listen<HotkeySessionEvent>("hotkey-session", (event) => {
       useRecordingStore.getState().setHotkeyStatus(event.payload);
       useRecordingStore.getState().setIsRecording(event.payload.state === "recording");
-      if (event.payload.state !== "recording") {
+      if (["pasted", "error", "completed", "failed"].includes(event.payload.state)) {
         useRecordingStore.getState().setAudioLevel(0);
         useRecordingStore.getState().flushSessionBuffer();
+      } else if (event.payload.state !== "recording") {
+        useRecordingStore.getState().setAudioLevel(0);
       }
       useLogsStore.getState().addLog(`Hotkey ${event.payload.state}: ${event.payload.message}`);
     }).then((dispose) => {
