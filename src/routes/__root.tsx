@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createRootRoute, Outlet, useLocation, Link } from "@tanstack/react-router";
+import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "../hooks/useTauriEvents";
 import { useRecordingStore } from "../stores/recording";
 import { IconHome, IconAgent, IconActivity, IconSettings } from "../components/Icons";
@@ -19,8 +20,21 @@ function RootLayout() {
   const hotkeyStatus = useRecordingStore((state) => state.hotkeyStatus);
   const statusTone = hotkeyStatus.state === "recording" ? "recording" : "idle";
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accessibility, setAccessibility] = useState(true);
 
   const isAgent = location.pathname === "/agent";
+
+  useEffect(() => {
+    invoke<{ accessibility: boolean }>("check_permissions").then((status) => {
+      setAccessibility(status.accessibility);
+    });
+    const interval = setInterval(() => {
+      invoke<{ accessibility: boolean }>("check_permissions").then((status) => {
+        setAccessibility(status.accessibility);
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <main className="flex h-screen min-w-0 bg-paper-surface">
@@ -59,6 +73,16 @@ function RootLayout() {
         </div>
 
         <div className="flex flex-col gap-0.5">
+          {!accessibility && (
+            <button
+              type="button"
+              onClick={() => invoke("open_accessibility_settings")}
+              className="mb-1 flex items-center gap-2 rounded bg-[oklch(0.95_0.02_30)] px-2.5 py-2 text-left text-[0.78rem] text-[oklch(0.45_0.15_25)] transition-colors hover:bg-[oklch(0.92_0.03_30)] dark:bg-[oklch(0.25_0.04_30)] dark:text-[oklch(0.8_0.1_25)]"
+            >
+              <span className="shrink-0 text-[0.9rem]">⚠</span>
+              <span className="leading-tight">需要辅助功能权限才能粘贴</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}

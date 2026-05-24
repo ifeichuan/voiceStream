@@ -947,27 +947,49 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     write_clipboard_text(&text)
 }
 
+#[derive(Debug, Serialize, Clone)]
+struct PermissionStatus {
+    accessibility: bool,
+}
+
+#[tauri::command]
+fn check_permissions() -> PermissionStatus {
+    let accessibility = unsafe {
+        extern "C" {
+            fn AXIsProcessTrusted() -> bool;
+        }
+        AXIsProcessTrusted()
+    };
+
+    PermissionStatus { accessibility }
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        .status()
+        .map_err(|e| format!("Failed to open settings: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn request_microphone_permission() -> Result<(), String> {
+    // Trigger the permission dialog by briefly attempting to use the microphone
+    std::process::Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to return")
+        .output()
+        .map_err(|e| format!("Failed: {}", e))?;
+    Ok(())
+}
+
 fn write_clipboard_text(text: &str) -> Result<(), String> {
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to launch pbcopy: {}", e))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|e| format!("Failed to write clipboard content: {}", e))?;
-    }
-
-    let status = child
-        .wait()
-        .map_err(|e| format!("pbcopy wait failed: {}", e))?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err("pbcopy returned non-zero exit status".to_string())
-    }
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Failed to open clipboard: {}", e))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to write to clipboard: {}", e))
 }
 
 
@@ -975,8 +997,19 @@ fn trigger_cmd_v() -> Result<(), String> {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| "Failed to create CGEventSource. Grant Accessibility access.")?;
+    // Check accessibility trust
+    let trusted = unsafe {
+        extern "C" {
+            fn AXIsProcessTrusted() -> bool;
+        }
+        AXIsProcessTrusted()
+    };
+    if !trusted {
+        return Err("App is not trusted for Accessibility. Add VoiceStream in System Settings > Privacy & Security > Accessibility.".to_string());
+    }
+
+    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+        .map_err(|_| "Failed to create CGEventSource.")?;
 
     // key code 9 = 'v'
     let key_down = CGEvent::new_keyboard_event(source.clone(), 9, true)
@@ -988,6 +1021,7 @@ fn trigger_cmd_v() -> Result<(), String> {
     key_up.set_flags(CGEventFlags::CGEventFlagCommand);
 
     key_down.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(30));
     key_up.post(CGEventTapLocation::HID);
 
     Ok(())
@@ -1093,7 +1127,6 @@ fn notify_agent_task_completed(app: &AppHandle, task: &agent_tasks::AgentTask, f
         .filter(|value| !value.eq_ignore_ascii_case("ok"))
         .unwrap_or_else(|| task.title.clone());
     let display_text = format!("完成 · {}", truncate_chars(&summary, 86));
-    let spoken_text = format!("Agent 任务已完成：{}", truncate_chars(&summary, 92));
 
     emit_agent_notification(
         app,
@@ -1101,11 +1134,10 @@ fn notify_agent_task_completed(app: &AppHandle, task: &agent_tasks::AgentTask, f
         "completed",
         &summary,
         &display_text,
-        &spoken_text,
+        "", // spoken_text handled by extension's agent_end
     );
     native_hud::show_success(app, &display_text);
     schedule_hide_hud(app, 4200);
-    speak_notification(&spoken_text);
 }
 
 fn notify_agent_task_failed(app: &AppHandle, task: &agent_tasks::AgentTask, error: &str) {
@@ -1611,6 +1643,8 @@ pub fn run() {
             stop_recording,
             play_recorded,
             copy_to_clipboard,
+            check_permissions,
+            open_accessibility_settings,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
