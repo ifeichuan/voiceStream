@@ -79,7 +79,6 @@ export interface PiSettingsView {
   model: string;
   reuse_process: boolean;
   prompt_template_key: string;
-  custom_prompt_template: string;
   provider_json: string;
   thinking: string;
 }

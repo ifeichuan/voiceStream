@@ -8,7 +8,6 @@ export const AGENT_TERMINAL_BOTTOM_THRESHOLD = 24;
 
 export const PI_MODES = [
   { value: "dictation-fast", label: "快速整理" },
-  { value: "dictation-voice", label: "语音反馈" },
 ] as const;
 
 export const THINKING_LEVELS = [
@@ -27,9 +26,6 @@ export const PROMPT_TEMPLATES = [
   { value: "structured", label: "结构化 · 轻结构化" },
   { value: "official-lite", label: "官方感 · 简洁清晰" },
   { value: "list-friendly", label: "列表友好 · 1. 2. 3." },
-  { value: "json-structured", label: "JSON 结构化 · 稳定解析" },
-  { value: "tooluse-structured", label: "Tool Use 结构化 · 最稳" },
-  { value: "custom", label: "自定义 · 手动模板" },
 ] as const;
 
 export const NAV_ITEMS = [
