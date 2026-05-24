@@ -7,9 +7,17 @@ import { IconHome, IconAgent, IconActivity, IconSettings } from "../components/I
 import { SettingsDialog } from "../components/SettingsDialog";
 import Agent from "../pages/Agent";
 
+const IconRpc = ({ className }: { className?: string }) => (
+  <svg className={className} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="M5 8h1M8 8h1M11 8h1" strokeLinecap="round" />
+  </svg>
+);
+
 const NAV_ITEMS = [
   { label: "首页", to: "/", icon: IconHome },
   { label: "Agent", to: "/agent", icon: IconAgent },
+  { label: "RPC", to: "/rpc", icon: IconRpc },
   { label: "活动", to: "/activity", icon: IconActivity },
 ] as const;
 
