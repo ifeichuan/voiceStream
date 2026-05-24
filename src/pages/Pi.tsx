@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSettingsStore } from "../stores/settings";
-import { PI_MODES, PROMPT_TEMPLATES } from "../lib/constants";
+import { PI_MODES, PROMPT_TEMPLATES, THINKING_LEVELS } from "../lib/constants";
 
 export default function Pi() {
   const { piSettings, setPiSettings, localPi } = useSettingsStore();
@@ -147,6 +147,24 @@ export default function Pi() {
                   placeholder="qwen3.5-flash"
                 />
               )}
+            </div>
+          </div>
+
+          {/* Thinking level */}
+          <div className="form-row">
+            <span className="form-row-label">推理等级</span>
+            <div className="form-row-control">
+              <select
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={piSettings.thinking}
+                onChange={(e) => setPiSettings((prev) => ({ ...prev, thinking: e.target.value }))}
+              >
+                {THINKING_LEVELS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
