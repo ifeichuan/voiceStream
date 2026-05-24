@@ -4,6 +4,7 @@ mod audio;
 mod db;
 mod native_hud;
 mod pi_rpc;
+mod rpc_terminal;
 mod settings;
 mod stt;
 mod stt_providers;
@@ -208,6 +209,26 @@ fn resize_agent_terminal(task_id: String, cols: u16, rows: u16) -> Result<(), St
 #[tauri::command]
 fn stop_agent_terminal(task_id: String) {
     agent_terminal::stop(&task_id);
+}
+
+#[tauri::command]
+fn start_rpc_terminal(app: AppHandle, config: rpc_terminal::RpcTerminalConfig) -> Result<(), String> {
+    rpc_terminal::start(app, config)
+}
+
+#[tauri::command]
+fn write_rpc_terminal(data: String) -> Result<(), String> {
+    rpc_terminal::write_data(&data)
+}
+
+#[tauri::command]
+fn resize_rpc_terminal(cols: u16, rows: u16) -> Result<(), String> {
+    rpc_terminal::resize(cols, rows)
+}
+
+#[tauri::command]
+fn stop_rpc_terminal() {
+    rpc_terminal::stop();
 }
 
 #[tauri::command]
@@ -1640,6 +1661,10 @@ pub fn run() {
             write_agent_terminal,
             resize_agent_terminal,
             stop_agent_terminal,
+            start_rpc_terminal,
+            write_rpc_terminal,
+            resize_rpc_terminal,
+            stop_rpc_terminal,
             continue_agent_task,
             save_stt_settings,
             test_stt_settings,
@@ -1657,6 +1682,7 @@ pub fn run() {
         .run(|_app_handle, event| {
             if matches!(event, RunEvent::Exit) {
                 agent_terminal::shutdown_all();
+                rpc_terminal::stop();
                 pi_rpc::shutdown_reusable_process()
             }
         });
