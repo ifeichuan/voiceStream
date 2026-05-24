@@ -399,7 +399,7 @@ fn spawn_pi_rpc() -> Result<
     }
 
     apply_launch_flags(&mut command, &config);
-    apply_provider_flags(&mut command, &runtime);
+    apply_provider_flags(&mut command, &runtime, false);
 
     log_launch(&pi_path, &app_root, &config, &runtime);
 
@@ -441,13 +441,17 @@ fn spawn_pi_rpc_for_agent_session(
         .arg(session_path);
 
     apply_launch_flags(&mut command, &config);
-    apply_provider_flags(&mut command, &runtime);
+    apply_provider_flags(&mut command, &runtime, true);
 
     eprintln!(
         "[pi-rpc] agent task session path={}",
         session_path.display()
     );
     log_launch(&pi_path, &app_root, &config, &runtime);
+
+    // Allow the voicestream-notify extension to speak AI-generated summaries
+    // via the agent_end event, so users hear a real summary instead of raw text.
+    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "1");
 
     spawn_command(command)
 }
@@ -462,7 +466,7 @@ pub(crate) fn agent_terminal_command_parts(
     let mut args = vec!["--session".to_string(), session_path.display().to_string()];
 
     push_launch_args(&mut args, &config);
-    push_provider_args(&mut args, &runtime);
+    push_provider_args(&mut args, &runtime, true);
     eprintln!(
         "[pi-terminal] cwd={} session={} pi={} extensions={} provider={} model={}",
         app_root.display(),
@@ -536,7 +540,11 @@ fn push_launch_args(args: &mut Vec<String>, config: &PiRpcLaunchConfig) {
     }
 }
 
-fn apply_provider_flags(command: &mut Command, runtime: &settings::RuntimePiSettings) {
+fn apply_provider_flags(
+    command: &mut Command,
+    runtime: &settings::RuntimePiSettings,
+    include_thinking: bool,
+) {
     if !runtime.provider.trim().is_empty() {
         command.arg("--provider").arg(&runtime.provider);
     }
@@ -545,12 +553,16 @@ fn apply_provider_flags(command: &mut Command, runtime: &settings::RuntimePiSett
         command.arg("--model").arg(&runtime.model);
     }
 
-    if !runtime.thinking.trim().is_empty() {
+    if include_thinking && !runtime.thinking.trim().is_empty() {
         command.arg("--thinking").arg(&runtime.thinking);
     }
 }
 
-fn push_provider_args(args: &mut Vec<String>, runtime: &settings::RuntimePiSettings) {
+fn push_provider_args(
+    args: &mut Vec<String>,
+    runtime: &settings::RuntimePiSettings,
+    include_thinking: bool,
+) {
     if !runtime.provider.trim().is_empty() {
         args.push("--provider".to_string());
         args.push(runtime.provider.clone());
@@ -561,7 +573,7 @@ fn push_provider_args(args: &mut Vec<String>, runtime: &settings::RuntimePiSetti
         args.push(runtime.model.clone());
     }
 
-    if !runtime.thinking.trim().is_empty() {
+    if include_thinking && !runtime.thinking.trim().is_empty() {
         args.push("--thinking".to_string());
         args.push(runtime.thinking.clone());
     }
