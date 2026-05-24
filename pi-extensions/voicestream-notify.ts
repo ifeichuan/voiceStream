@@ -214,12 +214,11 @@ export default function voicestreamNotifyExtension(pi: ExtensionAPI) {
     label: "Summarize Session",
     description:
       "Generate a concise Chinese summary of the full conversation and speak it aloud. " +
-      "Call this at the end of a task instead of voice_feedback — summarize_session handles " +
-      "both summarization and speech in one call. The summary includes task goal, key results, and next steps.",
+      "Call this at the end of a task. The summary includes task goal, key results, and next steps.",
     promptSnippet: "Summarize task results and speak them aloud",
     promptGuidelines: [
       "Use summarize_session at the end of a task to provide spoken feedback.",
-      "Do NOT call voice_feedback separately — summarize_session handles summary + speech.",
+      "Do not call a separate speech tool — summarize_session handles summary + speech.",
     ],
     parameters: Type.Object({
       text: Type.String({
