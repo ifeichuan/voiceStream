@@ -69,7 +69,7 @@ impl PiRpcLaunchConfig {
             }),
             PiRpcLaunchMode::AgentSession => {
                 let session_path = app_root.join(".pi/sessions/voice-dictation.jsonl");
-                let mut extension_paths = vec![resolve_voice_feedback_extension(app_root)?];
+                let mut extension_paths = Vec::new();
                 if let Some(extension) = resolve_voicestream_notify_extension(app_root)? {
                     extension_paths.push(extension);
                 }
@@ -871,7 +871,7 @@ fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBu
         ));
     }
 
-    let extension = app_root.join(".pi/extensions/voicestream-notify/index.ts");
+    let extension = app_root.join("pi-extensions/voicestream-notify.ts");
     if extension.exists() {
         Ok(Some(extension))
     } else {
