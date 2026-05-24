@@ -970,14 +970,6 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
     }
 }
 
-fn read_clipboard_text() -> Option<String> {
-    let output = Command::new("pbpaste").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    String::from_utf8(output.stdout).ok()
-}
 
 fn trigger_cmd_v() -> Result<(), String> {
     let status = Command::new("osascript")

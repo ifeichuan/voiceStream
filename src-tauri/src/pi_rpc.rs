@@ -628,6 +628,51 @@ fn spawn_command(
     String,
 > {
     command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
+    command.env("TERM", "xterm-256color");
+
+    if let Ok(home) = std::env::var("HOME") {
+        let system_path = std::env::var("PATH").unwrap_or_default();
+        let mut extra: Vec<String> = vec![
+            format!("{}/Library/pnpm", home),
+            format!("{}/.local/bin", home),
+            format!("{}/.bun/bin", home),
+            "/usr/local/bin".to_string(),
+            "/opt/homebrew/bin".to_string(),
+        ];
+        let fnm_dir = format!("{}/.local/share/fnm/node-versions", home);
+        if let Ok(entries) = std::fs::read_dir(&fnm_dir) {
+            if let Some(version) = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .max()
+            {
+                extra.push(format!("{}/installation/bin", version.display()));
+            }
+        }
+        let nvm_dir = format!("{}/.nvm/versions/node", home);
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            if let Some(version) = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .max()
+            {
+                extra.push(format!("{}/bin", version.display()));
+            }
+        }
+        extra.push(format!("{}/.volta/bin", home));
+
+        let enriched = extra
+            .iter()
+            .filter(|p| std::path::Path::new(p.as_str()).is_dir())
+            .chain(std::iter::once(&system_path))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(":");
+        command.env("PATH", enriched);
+    }
+
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
