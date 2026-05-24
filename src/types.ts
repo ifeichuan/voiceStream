@@ -5,6 +5,10 @@ export interface AudioChunk {
   size: number;
 }
 
+export interface AudioLevelEvent {
+  level: number;
+}
+
 export interface HotkeySessionEvent {
   state: string;
   message: string;

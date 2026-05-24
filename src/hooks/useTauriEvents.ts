@@ -6,6 +6,7 @@ import { useAgentStore } from "../stores/agent";
 import { useSettingsStore } from "../stores/settings";
 import type {
   AudioChunk,
+  AudioLevelEvent,
   SttTranscriptEvent,
   SttStatusEvent,
   HotkeySessionEvent,
@@ -23,6 +24,7 @@ export function useTauriEvents() {
     const addLog = useLogsStore.getState().addLog;
 
     let unlistenAudio: (() => void) | undefined;
+    let unlistenAudioLevel: (() => void) | undefined;
     let unlistenStt: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
     let unlistenHotkey: (() => void) | undefined;
@@ -45,10 +47,16 @@ export function useTauriEvents() {
       unlistenAudio = dispose;
     });
 
+    void listen<AudioLevelEvent>("audio-level", (event) => {
+      useRecordingStore.getState().setAudioLevel(event.payload.level);
+    }).then((dispose) => {
+      unlistenAudioLevel = dispose;
+    });
+
     void listen<SttTranscriptEvent>("stt-transcript", (event) => {
       const { text, is_final } = event.payload;
       if (is_final) {
-        useRecordingStore.getState().setFinalTranscript((prev) => [...prev, text]);
+        useRecordingStore.getState().appendSessionBuffer(text);
         useRecordingStore.getState().setPartialTranscript("");
       } else {
         useRecordingStore.getState().setPartialTranscript(text);
@@ -68,6 +76,10 @@ export function useTauriEvents() {
     void listen<HotkeySessionEvent>("hotkey-session", (event) => {
       useRecordingStore.getState().setHotkeyStatus(event.payload);
       useRecordingStore.getState().setIsRecording(event.payload.state === "recording");
+      if (event.payload.state !== "recording") {
+        useRecordingStore.getState().setAudioLevel(0);
+        useRecordingStore.getState().flushSessionBuffer();
+      }
       useLogsStore.getState().addLog(`Hotkey ${event.payload.state}: ${event.payload.message}`);
     }).then((dispose) => {
       unlistenHotkey = dispose;
@@ -106,6 +118,7 @@ export function useTauriEvents() {
 
     return () => {
       unlistenAudio?.();
+      unlistenAudioLevel?.();
       unlistenStt?.();
       unlistenStatus?.();
       unlistenHotkey?.();
