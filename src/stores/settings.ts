@@ -55,6 +55,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     prompt_template_key: "default",
     custom_prompt_template: "",
     provider_json: "",
+    thinking: "",
   },
   shortcutSettings: {
     dictation_shortcut: DEFAULT_SHORTCUT,
@@ -124,6 +125,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             prompt_template_key: piSettings.prompt_template_key,
             custom_prompt_template: piSettings.custom_prompt_template,
             provider_json: piSettings.provider_json,
+            thinking: piSettings.thinking,
           },
           shortcuts: {
             agent_shortcut: shortcutSettings.agent_shortcut,

@@ -77,6 +77,7 @@ export interface PiSettingsView {
   prompt_template_key: string;
   custom_prompt_template: string;
   provider_json: string;
+  thinking: string;
 }
 
 export interface AppSettingsView {

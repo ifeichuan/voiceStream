@@ -11,6 +11,16 @@ export const PI_MODES = [
   { value: "dictation-voice", label: "语音反馈" },
 ] as const;
 
+export const THINKING_LEVELS = [
+  { value: "", label: "默认（模型自身）" },
+  { value: "off", label: "关闭" },
+  { value: "minimal", label: "最低" },
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+  { value: "xhigh", label: "最高" },
+] as const;
+
 export const PROMPT_TEMPLATES = [
   { value: "default", label: "默认 · 最小整理" },
   { value: "light", label: "轻量 · 轻修正" },

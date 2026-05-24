@@ -544,6 +544,10 @@ fn apply_provider_flags(command: &mut Command, runtime: &settings::RuntimePiSett
     if !runtime.model.trim().is_empty() {
         command.arg("--model").arg(&runtime.model);
     }
+
+    if !runtime.thinking.trim().is_empty() {
+        command.arg("--thinking").arg(&runtime.thinking);
+    }
 }
 
 fn push_provider_args(args: &mut Vec<String>, runtime: &settings::RuntimePiSettings) {
@@ -555,6 +559,11 @@ fn push_provider_args(args: &mut Vec<String>, runtime: &settings::RuntimePiSetti
     if !runtime.model.trim().is_empty() {
         args.push("--model".to_string());
         args.push(runtime.model.clone());
+    }
+
+    if !runtime.thinking.trim().is_empty() {
+        args.push("--thinking".to_string());
+        args.push(runtime.thinking.clone());
     }
 }
 

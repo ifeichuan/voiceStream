@@ -56,6 +56,7 @@ pub struct PiSettingsInput {
     pub prompt_template_key: String,
     pub custom_prompt_template: String,
     pub provider_json: String,
+    pub thinking: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -79,6 +80,7 @@ pub struct PiSettingsView {
     pub prompt_template_key: String,
     pub custom_prompt_template: String,
     pub provider_json: String,
+    pub thinking: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -130,6 +132,7 @@ pub struct RuntimePiSettings {
     pub prompt_template_key: String,
     pub prompt_template: String,
     pub provider_json: String,
+    pub thinking: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,6 +168,8 @@ struct StoredPiSettings {
     prompt_template_key: String,
     custom_prompt_template: String,
     provider_json: String,
+    #[serde(default)]
+    thinking: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -285,6 +290,16 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
         .or_else(|| sanitize(&stored.pi.mode))
         .unwrap_or_else(|| DEFAULT_PI_MODE.to_string());
     let reuse_process = env_reuse.unwrap_or(stored.pi.reuse_process);
+    let env_thinking = env::var("VOICESTREAM_PI_THINKING")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let thinking = env_thinking
+        .or_else(|| {
+            let t = stored.pi.thinking.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        })
+        .unwrap_or_default();
 
     RuntimePiSettings {
         mode,
@@ -294,6 +309,7 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
         prompt_template_key: stored.pi.prompt_template_key.clone(),
         prompt_template: resolve_prompt_template(&stored.pi),
         provider_json: stored.pi.provider_json,
+        thinking,
     }
 }
 
@@ -343,6 +359,7 @@ fn pi_view_from_stored(stored: &StoredPiSettings) -> PiSettingsView {
         prompt_template_key: stored.prompt_template_key.clone(),
         custom_prompt_template: stored.custom_prompt_template.clone(),
         provider_json: stored.provider_json.clone(),
+        thinking: stored.thinking.clone(),
     }
 }
 
@@ -390,6 +407,7 @@ fn merge_pi_settings(
             .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE_KEY.to_string()),
         custom_prompt_template: input.custom_prompt_template.trim().to_string(),
         provider_json: input.provider_json.trim().to_string(),
+        thinking: input.thinking.trim().to_string(),
     }
 }
 
@@ -526,6 +544,7 @@ fn default_pi_settings() -> StoredPiSettings {
         prompt_template_key: DEFAULT_PROMPT_TEMPLATE_KEY.to_string(),
         custom_prompt_template: String::new(),
         provider_json: String::new(),
+        thinking: String::new(),
     }
 }
 
