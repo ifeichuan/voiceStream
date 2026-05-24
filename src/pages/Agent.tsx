@@ -684,7 +684,7 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
       rows: AGENT_TERMINAL_ROWS,
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: "'Maple Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace",
+      fontFamily: "var(--font-mono)",
       theme: getXtermTheme(),
       allowProposedApi: true,
     });
@@ -705,17 +705,17 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
         });
       });
 
-      const viewport = el.querySelector<HTMLElement>(".xterm-viewport");
-      if (viewport) {
-        viewport.addEventListener("scroll", () => callbacksRef.current.onScroll());
-      }
+      term.onScroll(() => callbacksRef.current.onScroll());
 
-      let fitScheduled = false;
+      const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const onThemeChange = () => { term.options.theme = getXtermTheme(); };
+      themeQuery.addEventListener("change", onThemeChange);
+
+      let fitRaf = 0;
       const doFit = () => {
-        if (fitScheduled) return;
-        fitScheduled = true;
-        requestAnimationFrame(() => {
-          fitScheduled = false;
+        if (fitRaf) return;
+        fitRaf = requestAnimationFrame(() => {
+          fitRaf = 0;
           if (el.clientWidth > 0 && el.clientHeight > 0) {
             const dims = fitAddon.proposeDimensions();
             if (dims && dims.cols > 0 && dims.rows > 0) {
@@ -737,6 +737,8 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
 
       return () => {
         resizeObserver.disconnect();
+        if (fitRaf) cancelAnimationFrame(fitRaf);
+        themeQuery.removeEventListener("change", onThemeChange);
         term.dispose();
         if (xtermRef.current === term) {
           xtermRef.current = null;
