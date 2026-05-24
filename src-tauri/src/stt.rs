@@ -13,7 +13,6 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, Message},
 };
 
-const DEFAULT_PROVIDER: &str = "aliyun-bailian";
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const TARGET_CHANNELS: u16 = 1;
 static TRANSCRIPT_STATE: Mutex<TranscriptState> = Mutex::new(TranscriptState::new());
@@ -54,6 +53,110 @@ pub use settings::{SttSettingsInput, SttSettingsView};
 
 type StoredSttSettings = settings::SttSettingsInput;
 
+/// Known STT provider identifiers.
+pub const PROVIDER_ALIYUN_BAILIAN: &str = "aliyun-bailian";
+pub const PROVIDER_DEEPGRAM: &str = "deepgram";
+pub const PROVIDER_ASSEMBLYAI: &str = "assemblyai";
+pub const PROVIDER_SONIOX: &str = "soniox";
+pub const PROVIDER_GLADIA: &str = "gladia";
+pub const PROVIDER_OPENAI: &str = "openai";
+
+/// List of all known provider IDs for frontend display.
+#[allow(dead_code)]
+pub const KNOWN_PROVIDERS: &[(&str, &str)] = &[
+    (PROVIDER_ALIYUN_BAILIAN, "阿里云百炼"),
+    (PROVIDER_DEEPGRAM, "Deepgram"),
+    (PROVIDER_ASSEMBLYAI, "AssemblyAI"),
+    (PROVIDER_SONIOX, "Soniox"),
+    (PROVIDER_GLADIA, "Gladia"),
+    (PROVIDER_OPENAI, "OpenAI Realtime"),
+];
+
+/// Metadata about a provider's requirements, used by frontend for adaptive UI.
+#[derive(Debug, Serialize, Clone)]
+pub struct SttProviderMeta {
+    pub id: String,
+    pub label: String,
+    pub needs_api_key: bool,
+    pub needs_endpoint: bool,
+    pub needs_model: bool,
+    pub needs_workspace_id: bool,
+    pub default_endpoint: String,
+    pub default_model: String,
+    pub default_sample_rate: u32,
+}
+
+pub fn provider_meta_list() -> Vec<SttProviderMeta> {
+    vec![
+        SttProviderMeta {
+            id: PROVIDER_ALIYUN_BAILIAN.to_string(),
+            label: "阿里云百炼".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: true,
+            needs_workspace_id: true,
+            default_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/inference".to_string(),
+            default_model: "fun-asr-realtime".to_string(),
+            default_sample_rate: 16_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_DEEPGRAM.to_string(),
+            label: "Deepgram".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: true,
+            needs_workspace_id: false,
+            default_endpoint: "wss://api.deepgram.com/v1/listen".to_string(),
+            default_model: "nova-2".to_string(),
+            default_sample_rate: 16_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_ASSEMBLYAI.to_string(),
+            label: "AssemblyAI".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: false,
+            needs_workspace_id: false,
+            default_endpoint: "wss://api.assemblyai.com/v2/realtime/ws".to_string(),
+            default_model: String::new(),
+            default_sample_rate: 16_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_SONIOX.to_string(),
+            label: "Soniox".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: true,
+            needs_workspace_id: false,
+            default_endpoint: "wss://api.soniox.com/transcribe-websocket".to_string(),
+            default_model: "soniox-default".to_string(),
+            default_sample_rate: 16_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_GLADIA.to_string(),
+            label: "Gladia".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: false,
+            needs_workspace_id: false,
+            default_endpoint: "https://api.gladia.io/v2/live".to_string(),
+            default_model: String::new(),
+            default_sample_rate: 16_000,
+        },
+        SttProviderMeta {
+            id: PROVIDER_OPENAI.to_string(),
+            label: "OpenAI Realtime".to_string(),
+            needs_api_key: true,
+            needs_endpoint: true,
+            needs_model: true,
+            needs_workspace_id: false,
+            default_endpoint: "wss://api.openai.com/v1/realtime".to_string(),
+            default_model: "whisper-1".to_string(),
+            default_sample_rate: 24_000,
+        },
+    ]
+}
+
 pub trait SttProvider: Send {
     fn push_chunk(&self, pcm: Vec<i16>, sample_rate: u32, channels: u16) -> Result<(), String>;
     fn finish(&self) -> Result<(), String>;
@@ -79,6 +182,35 @@ pub fn mark_runtime_error(message: &str) {
     if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
         state.error = Some(message.to_string());
         state.finished = true;
+    }
+}
+
+/// Push a finalized transcript segment into the shared state.
+/// Called by provider adapters when they receive a final/completed result.
+pub fn push_final_transcript(text: &str) {
+    if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
+        state.finals.push(text.to_string());
+        state.partial.clear();
+        state.stable_partial_prefix.clear();
+    }
+}
+
+/// Update the partial (interim) transcript in the shared state.
+/// Called by provider adapters when they receive a partial/delta result.
+pub fn update_partial_transcript(text: &str) {
+    if let Ok(mut state) = TRANSCRIPT_STATE.lock() {
+        state.partial = text.to_string();
+    }
+}
+
+/// Read the current accumulated transcript for HUD display.
+pub fn current_transcript_for_hud() -> (String, String) {
+    if let Ok(state) = TRANSCRIPT_STATE.lock() {
+        let finalized = state.finals.concat();
+        let partial = state.partial.clone();
+        (finalized, partial)
+    } else {
+        (String::new(), String::new())
     }
 }
 
@@ -156,8 +288,50 @@ pub async fn test_settings(app: &AppHandle, input: SttSettingsInput) -> Result<S
         return Err("API key is required".to_string());
     }
 
-    test_connection(settings).await?;
-    Ok("Bailian connection test succeeded".to_string())
+    match settings.provider.as_str() {
+        PROVIDER_ALIYUN_BAILIAN | "" => {
+            test_connection(settings).await?;
+            Ok("Bailian connection test succeeded".to_string())
+        }
+        PROVIDER_DEEPGRAM => {
+            crate::stt_providers::deepgram::test_connection(
+                &settings.api_key,
+                &settings.api_endpoint,
+                &settings.model,
+            )
+            .await
+        }
+        PROVIDER_ASSEMBLYAI => {
+            crate::stt_providers::assemblyai::test_connection(
+                &settings.api_key,
+                &settings.api_endpoint,
+            )
+            .await
+        }
+        PROVIDER_SONIOX => {
+            crate::stt_providers::soniox::test_connection(
+                &settings.api_key,
+                &settings.api_endpoint,
+            )
+            .await
+        }
+        PROVIDER_GLADIA => {
+            crate::stt_providers::gladia::test_connection(
+                &settings.api_key,
+                &settings.api_endpoint,
+            )
+            .await
+        }
+        PROVIDER_OPENAI => {
+            crate::stt_providers::openai::test_connection(
+                &settings.api_key,
+                &settings.api_endpoint,
+                &settings.model,
+            )
+            .await
+        }
+        other => Err(format!("Provider '{}' does not support connection testing yet", other)),
+    }
 }
 
 pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttProvider>>, String> {
@@ -166,12 +340,86 @@ pub fn create_default_stt_provider(app: AppHandle) -> Result<Option<Box<dyn SttP
         mark_runtime_finished();
         emit_status(
             &app,
-            "disabled: save Bailian API key in Settings to enable realtime STT",
+            &settings.provider,
+            "disabled: save API key in Settings to enable realtime STT",
         );
         return Ok(None);
     }
 
-    Ok(Some(Box::new(AliyunBailianSttProvider::new(app, settings))))
+    create_stt_provider(app, settings)
+}
+
+/// Factory: create an STT provider instance based on the provider field in settings.
+pub fn create_stt_provider(
+    app: AppHandle,
+    settings: StoredSttSettings,
+) -> Result<Option<Box<dyn SttProvider>>, String> {
+    match settings.provider.as_str() {
+        PROVIDER_ALIYUN_BAILIAN | "" => {
+            Ok(Some(Box::new(AliyunBailianSttProvider::new(app, settings))))
+        }
+        PROVIDER_DEEPGRAM => {
+            Ok(Some(Box::new(
+                crate::stt_providers::deepgram::DeepgramSttProvider::new(
+                    app,
+                    settings.api_key,
+                    settings.api_endpoint,
+                    settings.model,
+                    settings.language,
+                ),
+            )))
+        }
+        PROVIDER_ASSEMBLYAI => {
+            Ok(Some(Box::new(
+                crate::stt_providers::assemblyai::AssemblyAiSttProvider::new(
+                    app,
+                    settings.api_key,
+                    settings.api_endpoint,
+                ),
+            )))
+        }
+        PROVIDER_SONIOX => {
+            Ok(Some(Box::new(
+                crate::stt_providers::soniox::SonioxSttProvider::new(
+                    app,
+                    settings.api_key,
+                    settings.api_endpoint,
+                    settings.model,
+                    settings.language,
+                ),
+            )))
+        }
+        PROVIDER_GLADIA => {
+            Ok(Some(Box::new(
+                crate::stt_providers::gladia::GladiaSttProvider::new(
+                    app,
+                    settings.api_key,
+                    settings.api_endpoint,
+                    settings.language,
+                ),
+            )))
+        }
+        PROVIDER_OPENAI => {
+            Ok(Some(Box::new(
+                crate::stt_providers::openai::OpenAiSttProvider::new(
+                    app,
+                    settings.api_key,
+                    settings.api_endpoint,
+                    settings.model,
+                    settings.language,
+                ),
+            )))
+        }
+        unknown => {
+            mark_runtime_finished();
+            emit_status(
+                &app,
+                unknown,
+                &format!("unknown STT provider: {}", unknown),
+            );
+            Ok(None)
+        }
+    }
 }
 
 impl AliyunBailianSttProvider {
@@ -181,7 +429,7 @@ impl AliyunBailianSttProvider {
         tauri::async_runtime::spawn(async move {
             if let Err(error) = run_session(app.clone(), settings, receiver).await {
                 mark_runtime_error(&error);
-                emit_status(&app, &format!("error: {}", error));
+                emit_status(&app, PROVIDER_ALIYUN_BAILIAN, &format!("error: {}", error));
             }
         });
 
@@ -292,7 +540,7 @@ async fn run_session(
     settings: StoredSttSettings,
     mut receiver: mpsc::UnboundedReceiver<SttCommand>,
 ) -> Result<(), String> {
-    emit_status(&app, "connecting");
+    emit_status(&app, PROVIDER_ALIYUN_BAILIAN, "connecting");
     let request = build_ws_request(&settings)?;
 
     let (socket, _) = connect_async(request)
@@ -332,7 +580,7 @@ async fn run_session(
         .await
         .map_err(|e| format!("run-task send failed: {}", e))?;
 
-    emit_status(&app, "starting");
+    emit_status(&app, PROVIDER_ALIYUN_BAILIAN, "starting");
 
     let mut task_started = false;
     let mut finish_requested = false;
@@ -369,7 +617,7 @@ async fn run_session(
                         if task_started {
                             send_finish(&mut writer, &task_id).await?;
                             finish_sent = true;
-                            emit_status(&app, "finishing");
+                            emit_status(&app, PROVIDER_ALIYUN_BAILIAN, "finishing");
                         }
                     }
                 }
@@ -400,7 +648,7 @@ async fn run_session(
         }
     }
 
-    emit_status(&app, "closed");
+    emit_status(&app, PROVIDER_ALIYUN_BAILIAN, "closed");
     Ok(())
 }
 
@@ -430,7 +678,7 @@ async fn handle_server_event(
     match event {
         "task-started" => {
             *task_started = true;
-            emit_status(app, "listening");
+            emit_status(app, PROVIDER_ALIYUN_BAILIAN, "listening");
 
             for audio in pending_audio.drain(..) {
                 writer
@@ -442,7 +690,7 @@ async fn handle_server_event(
             if *finish_requested && !*finish_sent {
                 send_finish(writer, task_id).await?;
                 *finish_sent = true;
-                emit_status(app, "finishing");
+                emit_status(app, PROVIDER_ALIYUN_BAILIAN, "finishing");
             }
         }
         "result-generated" => {
@@ -539,11 +787,11 @@ async fn send_finish(
         .map_err(|e| format!("finish-task send failed: {}", e))
 }
 
-fn emit_status(app: &AppHandle, status: &str) {
+fn emit_status(app: &AppHandle, provider: &str, status: &str) {
     let _ = app.emit(
         "stt-status",
         SttStatusEvent {
-            provider: DEFAULT_PROVIDER.to_string(),
+            provider: provider.to_string(),
             status: status.to_string(),
         },
     );

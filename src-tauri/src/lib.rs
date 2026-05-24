@@ -5,6 +5,7 @@ mod native_hud;
 mod pi_rpc;
 mod settings;
 mod stt;
+mod stt_providers;
 
 use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -145,6 +146,11 @@ enum HotkeyMode {
     RecordingStoppingOnRelease {
         purpose: RecordingPurpose,
     },
+}
+
+#[tauri::command]
+fn get_stt_providers() -> Vec<stt::SttProviderMeta> {
+    stt::provider_meta_list()
 }
 
 #[tauri::command]
@@ -1597,6 +1603,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_stt_settings,
+            get_stt_providers,
             get_agent_tasks,
             get_agent_session,
             start_agent_terminal,
