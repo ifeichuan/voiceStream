@@ -989,22 +989,9 @@ fn trigger_cmd_v() -> Result<(), String> {
 }
 
 fn paste_text_to_cursor(text: &str) -> Result<(), String> {
-    let previous_clipboard = read_clipboard_text();
     write_clipboard_text(text)?;
     std::thread::sleep(std::time::Duration::from_millis(120));
-    let paste_result = trigger_cmd_v();
-    std::thread::sleep(std::time::Duration::from_millis(120));
-
-    match previous_clipboard {
-        Some(previous) => {
-            let _ = write_clipboard_text(&previous);
-        }
-        None => {
-            let _ = write_clipboard_text("");
-        }
-    }
-
-    paste_result
+    trigger_cmd_v()
 }
 
 fn handle_hotkey_pressed(app: &AppHandle, purpose: RecordingPurpose) {
