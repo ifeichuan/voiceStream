@@ -196,11 +196,12 @@ export default function Agent() {
       const shouldFollowOutput = agentTerminalAtBottomRef.current;
       const chunk = new Uint8Array(data);
       if (agentTerminalReadyRef.current && xtermRef.current) {
-        xtermRef.current.write(chunk);
-        finishAgentTerminalLoading();
-        if (shouldFollowOutput) {
-          xtermRef.current.scrollToBottom();
-        }
+        xtermRef.current.write(chunk, () => {
+          finishAgentTerminalLoading();
+          if (shouldFollowOutput) {
+            xtermRef.current?.scrollToBottom();
+          }
+        });
       } else {
         pendingAgentTerminalOutputRef.current.push(chunk);
       }
@@ -724,7 +725,9 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
                 taskId,
                 cols: term.cols,
                 rows: term.rows,
-              }).catch(() => {});
+              }).catch((error) => {
+                callbacksRef.current.setAgentTerminalStatus(`调整终端尺寸失败：${getErrorMessage(error)}`);
+              });
             }
           }
         });
