@@ -1,6 +1,7 @@
 mod agent_tasks;
 mod agent_terminal;
 mod audio;
+mod db;
 mod native_hud;
 mod pi_rpc;
 mod settings;
@@ -1260,7 +1261,7 @@ fn maybe_run_pi_startup_self_test() {
     thread::spawn(|| {
         eprintln!("[voicestream][startup-test] starting pi self-test");
         let started_at = Instant::now();
-        let sample = "好的好的，我们现在测试一下 voice feedback 到底会不会被先调用。";
+        let sample = "好的好的，我们现在测试一下普通语音整理链路。";
         match pi_rpc::refine_text(sample) {
             Ok(result) => {
                 eprintln!(
@@ -1579,8 +1580,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             if let Ok(app_data_dir) = app.path().app_data_dir() {
-                settings::set_app_data_dir(app_data_dir);
+                settings::set_app_data_dir(app_data_dir.clone());
+                if let Err(e) = db::initialize(&app_data_dir) {
+                    eprintln!("[voicestream] db initialization failed: {}", e);
+                }
             }
+
+            pi_rpc::set_app_handle(app.handle().clone());
 
             if let Ok(resource_dir) = app.path().resource_dir() {
                 let candidate = resource_dir.join("pi-extensions");

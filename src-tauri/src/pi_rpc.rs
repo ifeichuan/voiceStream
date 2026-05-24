@@ -7,6 +7,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -15,7 +16,6 @@ const AGENT_PROMPT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 #[derive(Clone, Copy, Debug)]
 enum PiRpcLaunchMode {
     DictationFast,
-    DictationWithVoiceFeedback,
     AgentSession,
 }
 
@@ -30,42 +30,24 @@ struct PiRpcLaunchConfig {
     disable_prompt_templates: bool,
     disable_themes: bool,
     extension_paths: Vec<PathBuf>,
+    system_prompt: Option<String>,
 }
 
 impl PiRpcLaunchConfig {
-    fn for_mode(
-        mode: PiRpcLaunchMode,
-        app_root: &Path,
-        enable_tooluse_output: bool,
-    ) -> Result<Self, String> {
+    fn for_mode(mode: PiRpcLaunchMode, app_root: &Path) -> Result<Self, String> {
+        let runtime = settings::runtime_pi_settings();
         match mode {
             PiRpcLaunchMode::DictationFast => Ok(Self {
                 mode,
                 use_session: false,
                 session_path: None,
-                // Some providers reject requests when tools field is an empty array.
-                // Keep tools enabled.
-                disable_tools: false,
-                disable_extensions: !enable_tooluse_output,
+                disable_tools: true,
+                disable_extensions: true,
                 disable_skills: true,
                 disable_prompt_templates: true,
                 disable_themes: true,
-                extension_paths: if enable_tooluse_output {
-                    vec![resolve_dictation_emit_extension(app_root)?]
-                } else {
-                    vec![]
-                },
-            }),
-            PiRpcLaunchMode::DictationWithVoiceFeedback => Ok(Self {
-                mode,
-                use_session: false,
-                session_path: None,
-                disable_tools: false,
-                disable_extensions: false,
-                disable_skills: false,
-                disable_prompt_templates: false,
-                disable_themes: false,
-                extension_paths: vec![resolve_voice_feedback_extension(app_root)?],
+                extension_paths: vec![],
+                system_prompt: Some(runtime.system_prompt.clone()),
             }),
             PiRpcLaunchMode::AgentSession => {
                 let session_path = app_root.join(".pi/sessions/voice-dictation.jsonl");
@@ -84,6 +66,7 @@ impl PiRpcLaunchConfig {
                     disable_prompt_templates: false,
                     disable_themes: false,
                     extension_paths,
+                    system_prompt: None,
                 })
             }
         }
@@ -103,6 +86,29 @@ struct PiRpcProcess {
 
 static REUSABLE_PI_RPC: OnceLock<Mutex<Option<PiRpcProcess>>> = OnceLock::new();
 static APP_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+
+fn emit_timing(stage: &str, elapsed_ms: u128, details: &str) {
+    eprintln!(
+        "[pi-rpc][timing] {}: {} ms | {}",
+        stage, elapsed_ms, details
+    );
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit(
+            "timing-log",
+            crate::TimingEvent {
+                session_id: 0,
+                stage: format!("pi-rpc:{}", stage),
+                elapsed_ms,
+                details: details.to_string(),
+            },
+        );
+    }
+}
+
+pub fn set_app_handle(handle: AppHandle) {
+    let _ = APP_HANDLE.set(handle);
+}
 
 struct PiRpcTrace {
     started_at: Instant,
@@ -142,6 +148,20 @@ pub fn refine_text(text: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Ok(String::new());
     }
+
+    let runtime = settings::runtime_pi_settings();
+    emit_timing(
+        "refine_start",
+        0,
+        &format!(
+            "mode={} template_key={} reuse={} input_chars={} system_prompt_chars={}",
+            runtime.mode,
+            runtime.prompt_template_key,
+            runtime.reuse_process,
+            trimmed.chars().count(),
+            runtime.system_prompt.chars().count()
+        ),
+    );
 
     let launch_mode = current_launch_mode();
     if matches!(launch_mode, PiRpcLaunchMode::DictationFast) && should_reuse_process() {
@@ -344,7 +364,7 @@ fn refine_text_with_reusable_process(trimmed: &str) -> Result<String, String> {
         &process.rx,
         &process.stderr_buffer,
         &mut trace,
-        true,
+        false,
     );
 
     if result.is_err() {
@@ -369,11 +389,7 @@ fn spawn_pi_rpc() -> Result<
     let app_root = resolve_app_root()?;
     let runtime = settings::runtime_pi_settings();
     let launch_mode = current_launch_mode();
-    let enable_tooluse_output = runtime
-        .prompt_template_key
-        .trim()
-        .eq_ignore_ascii_case("tooluse-structured");
-    let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root, enable_tooluse_output)?;
+    let config = PiRpcLaunchConfig::for_mode(launch_mode, &app_root)?;
     let mut command = Command::new(&pi_path);
 
     command.current_dir(&app_root).arg("--mode").arg("rpc");
@@ -420,7 +436,7 @@ fn spawn_pi_rpc_for_agent_session(
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
     let runtime = settings::runtime_pi_settings();
-    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root, false)?;
+    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root)?;
     let mut command = Command::new(&pi_path);
 
     if let Some(parent) = session_path.parent() {
@@ -462,7 +478,7 @@ pub(crate) fn agent_terminal_command_parts(
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
     let runtime = settings::runtime_pi_settings();
-    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root, false)?;
+    let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root)?;
     let mut args = vec!["--session".to_string(), session_path.display().to_string()];
 
     push_launch_args(&mut args, &config);
@@ -513,8 +529,16 @@ fn apply_launch_flags(command: &mut Command, config: &PiRpcLaunchConfig) {
     if config.disable_themes {
         command.arg("--no-themes");
     }
+    if matches!(config.mode, PiRpcLaunchMode::DictationFast) {
+        command.arg("--thinking").arg("none");
+    }
     for extension in &config.extension_paths {
         command.arg("-e").arg(extension);
+    }
+    if let Some(prompt) = &config.system_prompt {
+        if !prompt.is_empty() {
+            command.arg("--system-prompt").arg(prompt);
+        }
     }
 }
 
@@ -534,9 +558,19 @@ fn push_launch_args(args: &mut Vec<String>, config: &PiRpcLaunchConfig) {
     if config.disable_themes {
         args.push("--no-themes".to_string());
     }
+    if matches!(config.mode, PiRpcLaunchMode::DictationFast) {
+        args.push("--thinking".to_string());
+        args.push("none".to_string());
+    }
     for extension in &config.extension_paths {
         args.push("-e".to_string());
         args.push(extension.display().to_string());
+    }
+    if let Some(prompt) = &config.system_prompt {
+        if !prompt.is_empty() {
+            args.push("--system-prompt".to_string());
+            args.push(prompt.clone());
+        }
     }
 }
 
@@ -744,15 +778,7 @@ fn spawn_command(
 }
 
 fn current_launch_mode() -> PiRpcLaunchMode {
-    match settings::runtime_pi_settings()
-        .mode
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "dictation-voice" => PiRpcLaunchMode::DictationWithVoiceFeedback,
-        _ => PiRpcLaunchMode::DictationFast,
-    }
+    PiRpcLaunchMode::DictationFast
 }
 
 fn should_reuse_process() -> bool {
@@ -824,35 +850,6 @@ fn resolve_app_root() -> Result<PathBuf, String> {
     Ok(cwd)
 }
 
-fn resolve_voice_feedback_extension(app_root: &Path) -> Result<PathBuf, String> {
-    if let Some(path) = env::var("VOICESTREAM_PI_VOICE_EXTENSION")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-    {
-        let normalized = path.canonicalize().unwrap_or(path.clone());
-        if normalized.exists() {
-            return Ok(normalized);
-        }
-
-        return Err(format!(
-            "voice feedback extension from VOICESTREAM_PI_VOICE_EXTENSION not found at {}",
-            path.display()
-        ));
-    }
-
-    let extension = app_root.join("pi-extensions/voice-feedback.ts");
-    if extension.exists() {
-        Ok(extension)
-    } else {
-        Err(format!(
-            "voice feedback extension not found at {}",
-            extension.display()
-        ))
-    }
-}
-
 fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBuf>, String> {
     if let Some(path) = env::var("VOICESTREAM_PI_NOTIFY_EXTENSION")
         .ok()
@@ -883,33 +880,8 @@ fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBu
     }
 }
 
-fn resolve_dictation_emit_extension(app_root: &Path) -> Result<PathBuf, String> {
-    if let Some(path) = env::var("VOICESTREAM_PI_DICTATION_TOOLUSE_EXTENSION")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-    {
-        let normalized = path.canonicalize().unwrap_or(path.clone());
-        if normalized.exists() {
-            return Ok(normalized);
-        }
-
-        return Err(format!(
-            "dictation tooluse extension from VOICESTREAM_PI_DICTATION_TOOLUSE_EXTENSION not found at {}",
-            path.display()
-        ));
-    }
-
-    let extension = app_root.join("pi-extensions/dictation-emit.ts");
-    if extension.exists() {
-        Ok(extension)
-    } else {
-        Err(format!(
-            "dictation emit extension not found at {}",
-            extension.display()
-        ))
-    }
+pub fn resolve_pi_path_public() -> PathBuf {
+    resolve_pi_path()
 }
 
 fn resolve_pi_path() -> PathBuf {
@@ -1025,9 +997,6 @@ fn wait_for_prompt_completion(
     let mut streamed_text = String::new();
     let mut last_assistant_error: Option<String> = None;
     let mut saw_first_text_delta = false;
-    let mut saw_toolcall_start = false;
-    let mut saw_tool_execution_start = false;
-    let mut tooluse_optimized: Option<String> = None;
 
     loop {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -1052,84 +1021,30 @@ fn wait_for_prompt_completion(
                             .and_then(|event| event.get("type"))
                             .and_then(Value::as_str);
 
-                        match event_type {
-                            Some("toolcall_start") if !saw_toolcall_start => {
-                                saw_toolcall_start = true;
+                        if event_type == Some("text_delta") {
+                            if !saw_first_text_delta {
+                                saw_first_text_delta = true;
                                 if let Some(trace) = trace.as_deref_mut() {
-                                    let tool_name = line
-                                        .value
-                                        .get("assistantMessageEvent")
-                                        .and_then(|event| event.get("partial"))
-                                        .and_then(|partial| partial.get("content"))
-                                        .and_then(Value::as_array)
-                                        .and_then(|content| content.first())
-                                        .and_then(|item| item.get("name"))
-                                        .and_then(Value::as_str)
-                                        .unwrap_or("unknown");
                                     trace.mark(
-                                        "first_toolcall_start",
-                                        &format!("tool={}", tool_name),
+                                        "first_text_delta",
+                                        "assistant started streaming text",
+                                    );
+                                    emit_timing(
+                                        "first_text_delta",
+                                        trace.last_mark.duration_since(trace.started_at).as_millis(),
+                                        "TTFT - time from start to first token from LLM",
                                     );
                                 }
                             }
-                            Some("text_delta") => {
-                                if !saw_first_text_delta {
-                                    saw_first_text_delta = true;
-                                    if let Some(trace) = trace.as_deref_mut() {
-                                        trace.mark(
-                                            "first_text_delta",
-                                            "assistant started streaming text",
-                                        );
-                                    }
-                                }
 
-                                if let Some(delta) = line
-                                    .value
-                                    .get("assistantMessageEvent")
-                                    .and_then(|event| event.get("delta"))
-                                    .and_then(Value::as_str)
-                                {
-                                    streamed_text.push_str(delta);
-                                }
-                            }
-                            Some("toolcall_end") => {
-                                if let Some(value) =
-                                    extract_optimized_from_toolcall_event(&line.value)
-                                {
-                                    tooluse_optimized = Some(value);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    Some("tool_execution_start") if !saw_tool_execution_start => {
-                        saw_tool_execution_start = true;
-                        if let Some(trace) = trace.as_deref_mut() {
-                            let tool_name = line
+                            if let Some(delta) = line
                                 .value
-                                .get("toolName")
+                                .get("assistantMessageEvent")
+                                .and_then(|event| event.get("delta"))
                                 .and_then(Value::as_str)
-                                .unwrap_or("unknown");
-                            trace
-                                .mark("first_tool_execution_start", &format!("tool={}", tool_name));
-                        }
-                    }
-                    Some("tool_execution_end") => {
-                        if let Some(trace) = trace.as_deref_mut() {
-                            let tool_name = line
-                                .value
-                                .get("toolName")
-                                .and_then(Value::as_str)
-                                .unwrap_or("unknown");
-                            let is_error = line
-                                .value
-                                .get("isError")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false);
-                            trace.mark(
-                                "tool_execution_end",
-                                &format!("tool={}, is_error={}", tool_name, is_error),
-                            );
+                            {
+                                streamed_text.push_str(delta);
+                            }
                         }
                     }
                     Some("message_end") => {
@@ -1141,20 +1056,6 @@ fn wait_for_prompt_completion(
                     Some("agent_end") => {
                         if let Some(trace) = trace.as_deref_mut() {
                             trace.mark("agent_end", "stream complete");
-                        }
-
-                        if streamed_text.trim().is_empty() {
-                            if let Some(text) = tooluse_optimized.clone() {
-                                streamed_text = text;
-                            }
-                        }
-
-                        if streamed_text.trim().is_empty() {
-                            if let Some(text) =
-                                extract_last_assistant_text_from_agent_end(&line.value)
-                            {
-                                streamed_text = text;
-                            }
                         }
 
                         if let Some(error) = last_assistant_error {
@@ -1407,9 +1308,9 @@ fn complete_prompt_cycle(
     rx: &mpsc::Receiver<RpcLine>,
     stderr_buffer: &Arc<Mutex<String>>,
     trace: &mut PiRpcTrace,
-    reset_session_before_prompt: bool,
+    reset_session: bool,
 ) -> Result<String, String> {
-    if reset_session_before_prompt {
+    if reset_session {
         write_command(
             stdin,
             &json!({
@@ -1419,7 +1320,7 @@ fn complete_prompt_cycle(
         )?;
         trace.mark("write_new_session", "request sent");
         wait_for_response(rx, child, stderr_buffer, "new-session-1", DEFAULT_TIMEOUT)?;
-        trace.mark("new_session_ack", "response received");
+        trace.mark("new_session_ack", "session reset confirmed");
     }
 
     write_command(
@@ -1427,7 +1328,7 @@ fn complete_prompt_cycle(
         &json!({
             "id": "prompt-1",
             "type": "prompt",
-            "message": settings::runtime_pi_settings().prompt_template.replace("{text}", trimmed),
+            "message": trimmed,
         }),
     )?;
     trace.mark(
@@ -1437,103 +1338,40 @@ fn complete_prompt_cycle(
 
     wait_for_response(rx, child, stderr_buffer, "prompt-1", DEFAULT_TIMEOUT)?;
     trace.mark("prompt_ack", "response received");
+    emit_timing(
+        "prompt_ack",
+        trace.last_mark.duration_since(trace.started_at).as_millis(),
+        "pi accepted prompt, waiting for LLM response",
+    );
+
     let streamed_text =
         wait_for_prompt_completion(rx, child, stderr_buffer, PROMPT_TIMEOUT, Some(trace))?;
+    let text = streamed_text.trim();
+    let output_chars = text.chars().count();
     trace.mark(
         "prompt_stream_complete",
-        &format!("streamed_chars={}", streamed_text.chars().count()),
+        &format!("streamed_chars={}", output_chars),
     );
 
-    if let Some(text) = sanitize_streamed_result(&streamed_text, trimmed) {
-        trace.mark(
-            "sanitize_streamed_result_hit",
-            &format!("output_chars={}", text.chars().count()),
+    if text.is_empty() {
+        emit_timing(
+            "result",
+            trace.last_mark.duration_since(trace.started_at).as_millis(),
+            &format!(
+                "path=original_fallback output_chars={} reason=empty_model_output",
+                trimmed.chars().count()
+            ),
         );
-        return Ok(text);
-    }
-    eprintln!(
-        "[pi-rpc][debug] sanitize_streamed_result_miss raw_streamed={}",
-        serde_json::to_string(&streamed_text).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-    );
-    trace.mark(
-        "sanitize_streamed_result_miss",
-        "falling back to get_last_assistant_text",
-    );
-
-    write_command(
-        stdin,
-        &json!({
-            "id": "last-1",
-            "type": "get_last_assistant_text",
-        }),
-    )?;
-    trace.mark("write_get_last_assistant_text", "request sent");
-
-    let response = wait_for_response(rx, child, stderr_buffer, "last-1", DEFAULT_TIMEOUT)?;
-    trace.mark("get_last_assistant_text_ack", "response received");
-    let raw_last_text = response
-        .get("data")
-        .and_then(|data| data.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    eprintln!(
-        "[pi-rpc][debug] get_last_assistant_text raw={}",
-        serde_json::to_string(&raw_last_text).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-    );
-
-    let text = sanitize_result(&raw_last_text, trimmed);
-    trace.mark(
-        "sanitize_get_last_assistant_text",
-        &format!("output_chars={}", text.chars().count()),
-    );
-    if !text.is_empty() {
-        return Ok(text);
+        return Ok(trimmed.to_string());
     }
 
-    write_command(
-        stdin,
-        &json!({
-            "id": "messages-1",
-            "type": "get_messages",
-        }),
-    )?;
-    trace.mark("write_get_messages", "request sent");
+    emit_timing(
+        "result",
+        trace.last_mark.duration_since(trace.started_at).as_millis(),
+        &format!("path=streamed output_chars={}", output_chars),
+    );
 
-    let messages = wait_for_response(rx, child, stderr_buffer, "messages-1", DEFAULT_TIMEOUT)?;
-    trace.mark("get_messages_ack", "response received");
-
-    if let Some(raw_message_text) = extract_last_assistant_text(&messages) {
-        eprintln!(
-            "[pi-rpc][debug] get_messages last_assistant_text raw={}",
-            serde_json::to_string(&raw_message_text)
-                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        let text = sanitize_result(&raw_message_text, trimmed);
-        if !text.is_empty() {
-            trace.mark(
-                "extract_last_assistant_text_hit",
-                &format!("output_chars={}", text.chars().count()),
-            );
-            return Ok(text);
-        }
-    }
-
-    if let Some(error) = extract_last_assistant_error(&messages) {
-        trace.mark("extract_last_assistant_error", &error);
-        return Err(format!(
-            "pi rpc assistant error: {}{}",
-            error,
-            format_stderr(stderr_buffer)
-        ));
-    }
-
-    trace.mark("empty_result", "all extraction paths returned empty");
-    Err(format!(
-        "pi rpc returned empty text{}",
-        format_stderr(stderr_buffer)
-    ))
+    Ok(text.to_string())
 }
 
 fn shutdown_child(child: &mut Child) {
@@ -1552,22 +1390,6 @@ fn format_stderr(stderr: &Arc<Mutex<String>>) -> String {
     } else {
         format!(" | stderr: {}", output)
     }
-}
-
-fn extract_last_assistant_text(response: &Value) -> Option<String> {
-    let messages = response.get("data")?.get("messages")?.as_array()?;
-
-    for message in messages.iter().rev() {
-        if message.get("role").and_then(Value::as_str) != Some("assistant") {
-            continue;
-        }
-
-        if let Some(text) = extract_text_from_message(message) {
-            return Some(text);
-        }
-    }
-
-    None
 }
 
 fn extract_last_assistant_text_from_agent_end(event: &Value) -> Option<String> {
@@ -1611,22 +1433,6 @@ fn extract_text_from_message(message: &Value) -> Option<String> {
     }
 }
 
-fn extract_last_assistant_error(response: &Value) -> Option<String> {
-    let messages = response.get("data")?.get("messages")?.as_array()?;
-
-    for message in messages.iter().rev() {
-        if message.get("role").and_then(Value::as_str) != Some("assistant") {
-            continue;
-        }
-
-        if let Some(error) = extract_assistant_error(message) {
-            return Some(error);
-        }
-    }
-
-    None
-}
-
 fn extract_assistant_error_from_event(event: &Value) -> Option<String> {
     extract_assistant_error(event.get("message")?)
 }
@@ -1642,297 +1448,10 @@ fn extract_assistant_error(message: &Value) -> Option<String> {
     None
 }
 
-fn extract_optimized_from_toolcall_event(event: &Value) -> Option<String> {
-    let assistant_event = event.get("assistantMessageEvent")?;
-
-    let candidates = [
-        assistant_event.pointer("/partial/content/0/arguments"),
-        assistant_event.pointer("/partial/content/0/args"),
-        assistant_event.pointer("/partial/content/0/input"),
-        assistant_event.pointer("/partial/content/0/parameters"),
-        assistant_event.pointer("/partial/content/0/params"),
-        assistant_event.pointer("/delta"),
-    ];
-
-    for candidate in candidates.into_iter().flatten() {
-        if let Some(result) = extract_optimized_from_value(candidate) {
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn extract_optimized_from_value(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-
-        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-            return extract_optimized_from_value(&parsed);
-        }
-
-        return None;
-    }
-
-    if let Some(obj) = value.as_object() {
-        if let Some(optimized) = obj.get("optimized").and_then(Value::as_str) {
-            let optimized = optimized.trim();
-            if !optimized.is_empty() {
-                return Some(optimized.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn sanitize_result(result: &str, original_text: &str) -> String {
-    let normalized = normalize_result_text(result);
-    if normalized.is_empty() {
-        eprintln!("[pi-rpc][sanitize] normalized is empty");
-        return String::new();
-    }
-
-    if let Some(json_optimized) = extract_json_optimized(&normalized) {
-        eprintln!(
-            "[pi-rpc][sanitize] extracted_json_result={}",
-            serde_json::to_string(&json_optimized)
-                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        let validated = validate_candidate(&json_optimized, original_text).unwrap_or_default();
-        eprintln!(
-            "[pi-rpc][sanitize] validated_json_result={}",
-            serde_json::to_string(&validated).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        return validated;
-    }
-
-    let prompt_echo = looks_like_prompt_echo(&normalized, original_text);
-    if prompt_echo {
-        eprintln!(
-            "[pi-rpc][sanitize] looks_like_prompt_echo normalized={}",
-            serde_json::to_string(&normalized)
-                .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        if let Some(recovered) = recover_from_echo(&normalized, original_text) {
-            eprintln!(
-                "[pi-rpc][sanitize] recovered_from_echo={}",
-                serde_json::to_string(&recovered)
-                    .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-            );
-            return recovered;
-        }
-        return String::new();
-    }
-
-    if let Some(extracted) = extract_tagged_result(&normalized) {
-        eprintln!(
-            "[pi-rpc][sanitize] extracted_tagged_result={}",
-            serde_json::to_string(&extracted).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        let validated = validate_candidate(&extracted, original_text).unwrap_or_default();
-        eprintln!(
-            "[pi-rpc][sanitize] validated_tagged_result={}",
-            serde_json::to_string(&validated).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-        );
-        return validated;
-    }
-
-    eprintln!(
-        "[pi-rpc][sanitize] normalized_without_tags={}",
-        serde_json::to_string(&normalized).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-    );
-    let validated = validate_candidate(&normalized, original_text).unwrap_or_default();
-    eprintln!(
-        "[pi-rpc][sanitize] validated_plain_result={}",
-        serde_json::to_string(&validated).unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
-    );
-    validated
-}
-
-fn sanitize_streamed_result(result: &str, original_text: &str) -> Option<String> {
-    let sanitized = sanitize_result(result, original_text);
-    if sanitized.is_empty() {
-        None
-    } else {
-        Some(sanitized)
-    }
-}
-
-fn extract_tagged_result(text: &str) -> Option<String> {
-    let start = text.rfind("<optimized>")?;
-    let end = text.rfind("</optimized>")?;
-    if end <= start {
-        return None;
-    }
-
-    let content = &text[start + "<optimized>".len()..end];
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn extract_json_optimized(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-
-    // Accept plain JSON object response.
-    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return value
-            .get("optimized")
-            .and_then(Value::as_str)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-    }
-
-    // Accept fenced JSON blocks.
-    if trimmed.starts_with("```") && trimmed.ends_with("```") {
-        let unwrapped = trimmed
-            .trim_start_matches("```json")
-            .trim_start_matches("```JSON")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim();
-
-        if let Ok(value) = serde_json::from_str::<Value>(unwrapped) {
-            return value
-                .get("optimized")
-                .and_then(Value::as_str)
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-        }
-    }
-
-    None
-}
-
-fn normalize_result_text(result: &str) -> String {
-    let mut cleaned = result
-        .trim()
-        .replace("<think>", "")
-        .replace("</think>", "")
-        .trim()
-        .to_string();
-
-    if cleaned.starts_with("```") && cleaned.ends_with("```") {
-        cleaned = cleaned
-            .trim_start_matches("```xml")
-            .trim_start_matches("```text")
-            .trim_start_matches("```markdown")
-            .trim_start_matches("```md")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim()
-            .to_string();
-    }
-
-    cleaned
-}
-
-fn validate_candidate(candidate: &str, original_text: &str) -> Option<String> {
-    let trimmed = candidate.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if looks_like_prompt_echo(trimmed, original_text) {
-        return recover_from_echo(trimmed, original_text);
-    }
-
-    Some(trimmed.to_string())
-}
-
-fn looks_like_prompt_echo(text: &str, _original_text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.contains("你是Prompt 优化工具。")
-        || trimmed.contains("核心规则：")
-        || trimmed.contains("输出规则：")
-        || trimmed.contains("请只处理下面 <raw> 标签中的内容：")
-        || trimmed.contains("<raw>")
-        || trimmed.contains("</raw>")
-        || trimmed.contains("以下是原始内容，请优化为高质量Prompt：")
-}
-
-fn recover_from_echo(text: &str, original_text: &str) -> Option<String> {
-    let trimmed = text.trim();
-
-    if let Some(raw_end) = trimmed.rfind("</raw>") {
-        let candidate = trimmed[raw_end + "</raw>".len()..].trim();
-        if let Some(valid) = validate_candidate_without_recovery(candidate, original_text) {
-            return Some(valid);
-        }
-    }
-
-    if let Some(marker) = trimmed.rfind("以下是原始内容，请优化为高质量Prompt：") {
-        let candidate = trimmed[marker + "以下是原始内容，请优化为高质量Prompt：".len()..].trim();
-        if let Some(valid) = validate_candidate_without_recovery(candidate, original_text) {
-            return Some(valid);
-        }
-    }
-
-    None
-}
-
-fn validate_candidate_without_recovery(candidate: &str, _original_text: &str) -> Option<String> {
-    let trimmed = candidate
-        .trim()
-        .trim_start_matches("<optimized>")
-        .trim_end_matches("</optimized>")
-        .trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if trimmed.contains("你是Prompt 优化工具。")
-        || trimmed.contains("核心规则：")
-        || trimmed.contains("输出规则：")
-        || trimmed.contains("<optimized>")
-        || trimmed.contains("</optimized>")
-        || trimmed.contains("<raw>")
-        || trimmed.contains("</raw>")
-        || trimmed.contains("以下是原始内容，请优化为高质量Prompt：")
-    {
-        return None;
-    }
-
-    Some(trimmed.to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{refine_text, sanitize_result, warmup};
+    use super::{refine_text, warmup};
     use std::time::Instant;
-
-    #[test]
-    fn extracts_last_tagged_payload() {
-        let result = "ignored <optimized>first</optimized>\n<optimized>final prompt</optimized>";
-        assert_eq!(sanitize_result(result, "raw"), "final prompt");
-    }
-
-    #[test]
-    fn rejects_prompt_echo_inside_tag() {
-        let result = "<optimized>你是Prompt 优化工具。\n输出规则：\n<raw>\nraw\n</raw></optimized>";
-        assert!(sanitize_result(result, "raw").is_empty());
-    }
-
-    #[test]
-    fn accepts_plain_original_text_when_it_is_valid() {
-        assert_eq!(sanitize_result("raw", "raw"), "raw");
-    }
-
-    #[test]
-    fn accepts_clean_tagged_output() {
-        let result = "<optimized>请将以下需求实现为一个简洁的 macOS 菜单栏应用，并保证默认支持中文输入。</optimized>";
-        assert_eq!(
-            sanitize_result(result, "做一个 mac 菜单栏语音输入"),
-            "请将以下需求实现为一个简洁的 macOS 菜单栏应用，并保证默认支持中文输入。"
-        );
-    }
 
     #[test]
     #[ignore = "real rpc benchmark; run manually with cargo test pi_rpc_repeated_refine_same_text -- --ignored --nocapture"]

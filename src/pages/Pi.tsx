@@ -217,20 +217,6 @@ export default function Pi() {
               </select>
             </div>
 
-            {/* Custom prompt */}
-            <div className="grid gap-3">
-              <span className="text-[0.86rem] text-paper-ink">自定义提示词</span>
-              <textarea
-                className="min-h-[100px] w-full resize-y rounded border-b border-paper-line bg-transparent px-0 py-2 font-mono text-[0.82rem] leading-[1.65] text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
-                rows={6}
-                value={piSettings.custom_prompt_template}
-                onChange={(e) =>
-                  setPiSettings((prev) => ({ ...prev, custom_prompt_template: e.target.value }))
-                }
-                placeholder="{text}"
-              />
-            </div>
-
             {/* Provider JSON override */}
             <div className="grid gap-3">
               <span className="text-[0.86rem] text-paper-ink">服务商 JSON 覆盖</span>
