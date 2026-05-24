@@ -685,7 +685,7 @@ function XTermContainer({ taskId, xtermRef, onReady, onScroll, onError, setAgent
       rows: AGENT_TERMINAL_ROWS,
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: "var(--font-mono)",
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "Menlo, Consolas, monospace",
       theme: getXtermTheme(),
       allowProposedApi: true,
     });
