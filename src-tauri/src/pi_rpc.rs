@@ -723,6 +723,8 @@ fn resolve_app_root() -> Result<PathBuf, String> {
         if let Some(parent) = current_exe.parent() {
             candidates.push(parent.to_path_buf());
             if let Some(grandparent) = parent.parent() {
+                // .app/Contents/Resources — where Tauri puts bundled resources
+                candidates.push(grandparent.join("Resources"));
                 candidates.push(grandparent.to_path_buf());
             }
         }
