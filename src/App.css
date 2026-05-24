@@ -121,6 +121,15 @@
     @apply pb-[18px];
   }
 
+  .list-item-alive {
+    @apply transition-[transform,opacity,color] duration-150 ease-out hover:translate-x-[3px];
+  }
+
+  .section-dot::before {
+    content: "";
+    @apply mr-2 inline-block h-[6px] w-[6px] rounded-full bg-paper-accent/60 align-middle;
+  }
+
   .row {
     @apply flex items-baseline justify-between gap-4 py-3.5 max-[760px]:flex-col max-[760px]:items-start;
   }

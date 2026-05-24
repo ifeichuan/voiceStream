@@ -12,7 +12,7 @@ export default function Activity() {
   return (
     <div className="grid gap-12 pt-[2vh]">
       <section>
-        <h3 className="text-base font-semibold tracking-[-0.03em]">通知</h3>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">通知</h3>
         <p className="mt-1.5 text-[0.86rem] text-paper-muted">VoiceStream 语音通知。</p>
 
         <div className="mt-6 grid gap-4">
@@ -20,7 +20,7 @@ export default function Activity() {
           {agentNotifications.map((notification) => (
             <div
               key={`${notification.task_id}-${notification.timestamp_ms}`}
-              className="grid gap-1 py-2"
+              className="list-item-alive grid gap-1 rounded px-2 py-2.5 hover:bg-paper-ink/[0.03]"
             >
               <div className="flex items-baseline justify-between gap-4 max-[760px]:flex-col max-[760px]:items-start">
                 <strong className="text-[0.88rem] font-semibold">
@@ -39,12 +39,12 @@ export default function Activity() {
       </section>
 
       <section>
-        <h3 className="text-base font-semibold tracking-[-0.03em]">转写</h3>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">转写</h3>
         <p className="mt-1.5 text-[0.86rem] text-paper-muted">转写结果。</p>
 
         <div className="mt-6 min-h-[120px]">
           {finalTranscript.map((line, index) => (
-            <div key={`${line}-${index}`} className="mt-2 text-[0.88rem] first:mt-0">
+            <div key={`${line}-${index}`} className="list-item-alive mt-1 rounded px-2 py-1.5 text-[0.88rem] first:mt-0 hover:bg-paper-ink/[0.03]">
               {line}
             </div>
           ))}
@@ -58,7 +58,7 @@ export default function Activity() {
       </section>
 
       <section>
-        <h3 className="text-base font-semibold tracking-[-0.03em]">日志</h3>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">日志</h3>
         <p className="mt-1.5 text-[0.86rem] text-paper-muted">{settingsStatus}</p>
 
         <div className="mt-6 max-h-80 overflow-auto font-mono text-[0.82rem] leading-[1.65]">

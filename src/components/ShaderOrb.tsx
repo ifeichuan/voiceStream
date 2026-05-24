@@ -1,10 +1,15 @@
 import { useRef, useEffect, useCallback, useState } from "react";
+import { motion, useSpring, useMotionValueEvent } from "motion/react";
 
 interface ShaderOrbProps {
   size?: number;
   isActive?: boolean;
   audioLevel?: number;
   className?: string;
+  collapsed?: boolean;
+  collapsedSize?: number;
+  onCollapseEnd?: () => void;
+  onExpandEnd?: () => void;
 }
 
 const VERTEX_SHADER = `#version 300 es
@@ -82,8 +87,7 @@ void main() {
   // Audio-reactive params
   float noiseIntensity = mix(1.0, 2.0, u_audioLevel);
   float glowIntensity = mix(1.5, 3.0, u_audioLevel);
-  float speed = mix(1.0, 2.5, u_active);
-  float t = iTime * speed;
+  float t = iTime;
 
   float l = dot(uv, uv);
 
@@ -148,12 +152,26 @@ void main() {
   fragColor = vec4(finalColor, 1.0);
 }`;
 
-export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, className }: ShaderOrbProps) {
+const SPRING_CONFIG = { stiffness: 280, damping: 22, mass: 1.2, type: "spring" as const };
+const BOOST_SPRING_CONFIG = { stiffness: 180, damping: 8, mass: 0.6, type: "spring" as const };
+const MAGNETIC_SPRING = { stiffness: 150, damping: 15, mass: 0.5 };
+const MAGNETIC_STRENGTH = 0.35;
+const MAGNETIC_RADIUS_FACTOR = 1.8;
+
+export function ShaderOrb({
+  size = 192,
+  isActive = false,
+  audioLevel = 0,
+  className,
+  collapsed = false,
+  collapsedSize = 48,
+  onCollapseEnd,
+  onExpandEnd,
+}: ShaderOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const rafRef = useRef<number>(0);
-  const startTimeRef = useRef(performance.now());
   const uniformsRef = useRef<Record<string, WebGLUniformLocation | null>>({});
   const smoothAudioRef = useRef(0);
   const smoothActiveRef = useRef(0);
@@ -161,9 +179,71 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
   const isActiveRef = useRef(isActive);
   const audioLevelRef = useRef(audioLevel);
   const [glReady, setGlReady] = useState(false);
+  const boostRef = useRef(0);
+  const magneticAreaRef = useRef<HTMLDivElement>(null);
+  const magnetX = useSpring(0, MAGNETIC_SPRING);
+  const magnetY = useSpring(0, MAGNETIC_SPRING);
 
   isActiveRef.current = isActive;
   audioLevelRef.current = audioLevel;
+
+  const scale = collapsed ? collapsedSize / size : 1;
+  const boostSpring = useSpring(0, BOOST_SPRING_CONFIG);
+
+  useMotionValueEvent(boostSpring, "change", (v) => {
+    boostRef.current = v;
+  });
+
+  const prevCollapsedRef = useRef(collapsed);
+  if (prevCollapsedRef.current !== collapsed) {
+    prevCollapsedRef.current = collapsed;
+    boostSpring.set(1);
+  }
+
+  const handleClick = useCallback(() => {
+    const intensity = 0.4 + Math.random() * 0.6;
+    console.log("[ShaderOrb] click → boost", intensity);
+    boostSpring.set(intensity);
+    setTimeout(() => {
+      console.log("[ShaderOrb] boost decay → 0, current:", boostRef.current);
+      boostSpring.set(0);
+    }, 600);
+  }, [boostSpring]);
+
+  useEffect(() => {
+    const area = magneticAreaRef.current;
+    if (!area) return;
+
+    const onMove = (e: PointerEvent) => {
+      const rect = area.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = e.clientX - centerX;
+      const dy = e.clientY - centerY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const radius = size * MAGNETIC_RADIUS_FACTOR / 2;
+      if (distance < radius) {
+        const falloff = 1 - distance / radius;
+        magnetX.set(dx * MAGNETIC_STRENGTH * falloff);
+        magnetY.set(dy * MAGNETIC_STRENGTH * falloff);
+      } else {
+        magnetX.set(0);
+        magnetY.set(0);
+      }
+    };
+
+    const onLeave = () => {
+      magnetX.set(0);
+      magnetY.set(0);
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerleave", onLeave);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerleave", onLeave);
+    };
+  }, [size, magnetX, magnetY]);
 
   const initGL = useCallback((canvas: HTMLCanvasElement) => {
     const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
@@ -244,19 +324,30 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let lastFrameTime = performance.now();
+    let shaderTime = 0;
     const render = () => {
       const u = uniformsRef.current;
       const now = performance.now();
       const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
       lastFrameTime = now;
-      const elapsed = (now - startTimeRef.current) / 1000;
 
-      const activeRate = 3.0;
-      const audioRate = 9.0;
-      smoothActiveRef.current += ((isActiveRef.current ? 1 : 0) - smoothActiveRef.current) * (1 - Math.exp(-activeRate * dt));
-      smoothAudioRef.current += (audioLevelRef.current - smoothAudioRef.current) * (1 - Math.exp(-audioRate * dt));
+      const raw = Math.max(0, Math.min(1, boostRef.current));
+      const envelope = raw;
+      const baseActive = isActiveRef.current ? 1 : 0;
+      const baseAudio = audioLevelRef.current;
+      const targetActive = Math.min(1.0, baseActive + envelope);
+      const targetAudio = Math.min(1.0, baseAudio + envelope * 0.7);
 
-      gl.uniform1f(u.iTime!, reducedMotion ? 0 : elapsed);
+      const activeRate = envelope > 0.01 ? 14.0 : 3.0;
+      const audioRate = envelope > 0.01 ? 14.0 : 9.0;
+      smoothActiveRef.current += (targetActive - smoothActiveRef.current) * (1 - Math.exp(-activeRate * dt));
+      smoothAudioRef.current += (targetAudio - smoothAudioRef.current) * (1 - Math.exp(-audioRate * dt));
+
+      // Accumulate shader time by dt * speed so boosts don't permanently advance time
+      const speed = 1.0 + smoothActiveRef.current * 3.0;
+      shaderTime += dt * speed;
+
+      gl.uniform1f(u.iTime!, reducedMotion ? 0 : shaderTime);
       gl.uniform1f(u.u_active!, smoothActiveRef.current);
       gl.uniform1f(u.u_audioLevel!, smoothAudioRef.current);
       gl.uniform1f(u.u_darkMode!, darkModeRef.current);
@@ -276,24 +367,62 @@ export function ShaderOrb({ size = 192, isActive = false, audioLevel = 0, classN
     };
   }, [size, initGL]);
 
+  const handleAnimationComplete = useCallback(() => {
+    boostSpring.set(0);
+    if (collapsed) {
+      onCollapseEnd?.();
+    } else {
+      onExpandEnd?.();
+    }
+  }, [collapsed, onCollapseEnd, onExpandEnd, boostSpring]);
+
   return (
-    <div className={className} style={{ width: size, height: size, position: "relative" }}>
-      <canvas
-        ref={canvasRef}
-        style={{ width: size, height: size, borderRadius: "50%", display: "block" }}
-        aria-hidden="true"
-      />
-      {!glReady && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            borderRadius: "50%",
-            background: "conic-gradient(from 0deg, oklch(0.75 0.15 350), oklch(0.80 0.12 200), oklch(0.78 0.14 280), oklch(0.75 0.15 350))",
-            filter: "blur(8px)",
-          }}
+    <div
+      ref={magneticAreaRef}
+      onClick={handleClick}
+      style={{
+        width: size * MAGNETIC_RADIUS_FACTOR,
+        height: size * MAGNETIC_RADIUS_FACTOR,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+        cursor: "pointer",
+      }}
+    >
+      <motion.div
+        className={className}
+        animate={{ scale }}
+        transition={SPRING_CONFIG}
+        onAnimationComplete={handleAnimationComplete}
+        onClick={handleClick}
+        style={{
+          x: magnetX,
+          y: magnetY,
+          width: size,
+          height: size,
+          position: "relative",
+          willChange: "transform",
+          cursor: "pointer",
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{ width: size, height: size, borderRadius: "50%", display: "block" }}
+          aria-hidden="true"
         />
-      )}
+        {!glReady && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: "50%",
+              background: "conic-gradient(from 0deg, oklch(0.75 0.15 350), oklch(0.80 0.12 200), oklch(0.78 0.14 280), oklch(0.75 0.15 350))",
+              filter: "blur(8px)",
+            }}
+          />
+        )}
+      </motion.div>
     </div>
   );
 }
