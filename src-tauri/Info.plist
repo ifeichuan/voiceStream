@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VoiceStream needs microphone access for voice input.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>VoiceStream needs Accessibility access to paste text into the focused app.</string>
+</dict>
+</plist>
