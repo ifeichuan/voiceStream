@@ -71,7 +71,7 @@ function RootLayout() {
       </aside>
 
       {/* Content wrapper */}
-      <div className="flex min-w-0 flex-1 flex-col p-[10px] pl-0">
+      <div className="flex min-w-0 flex-1 flex-col  pl-0 pt-0 pr-8 pb-8">
         <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.06)] dark:bg-[#1a1717] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
           {/* Agent always mounted */}
           <div className={isAgent ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}>

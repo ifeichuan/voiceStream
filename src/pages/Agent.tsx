@@ -370,7 +370,7 @@ export default function Agent() {
   };
 
   return (
-    <div className="grid min-h-0 flex-1 gap-[24px]  ">
+    <div className="grid min-h-0 flex-1 gap-[24px] p-6 pl-0 ">
       <section className="grid h-full min-h-0 grid-cols-[minmax(250px,0.36fr)_minmax(0,1fr)] gap-8 max-[960px]:grid-cols-1 max-[960px]:grid-rows-[1fr]">
         <div className="flex min-h-0 flex-col max-[960px]:hidden">
           <div className="mb-3 px-2">
