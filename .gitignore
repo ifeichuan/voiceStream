@@ -27,3 +27,8 @@ dist-ssr
 .pi/*.jsonl
 src-tauri/target
 src/routeTree.gen.ts
+.agent-env
+.agent-*.log
+.agent-*.pid
+.tauri.parallel*.json
+.pnpm-store

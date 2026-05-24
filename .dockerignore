@@ -1,0 +1,7 @@
+.claude
+.git
+.pi/sessions
+.pnpm-store
+dist
+node_modules
+src-tauri/target

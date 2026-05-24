@@ -1,0 +1,22 @@
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    environment:
+      PORT_APP: ${PORT_APP:-1420}
+      VOICESTREAM_DEV_PORT: ${PORT_APP:-1420}
+      VITE_PORT: ${PORT_APP:-1420}
+      HOST: 0.0.0.0
+    ports:
+      - "${PORT_APP:-1420}:${PORT_APP:-1420}"
+    volumes:
+      - ${APP_SOURCE:-.}:/app
+      - node_modules:/app/node_modules
+    command: >
+      sh -lc "pnpm install --frozen-lockfile &&
+      pnpm dev --host 0.0.0.0 --port ${PORT_APP:-1420} --strictPort"
+
+volumes:
+  node_modules:

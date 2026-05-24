@@ -24,6 +24,7 @@ use tauri_plugin_global_shortcut::{
 pub(crate) const DICTATION_SHORTCUT: &str = "Cmd+Shift+Space";
 const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
 const HOTKEY_TAP_THRESHOLD_MS: u128 = 220;
+const DISABLE_GLOBAL_SHORTCUTS_ENV: &str = "VOICESTREAM_DISABLE_GLOBAL_SHORTCUTS";
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AudioChunk {
@@ -1209,17 +1210,20 @@ fn now_unix_ms() -> u128 {
         .unwrap_or(0)
 }
 
-fn maybe_run_pi_startup_self_test() {
-    let enabled = env::var("VOICESTREAM_PI_STARTUP_TEST")
+fn env_flag_enabled(name: &str) -> bool {
+    env::var(name)
         .ok()
         .map(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
+                "1" | "true" | "yes" | "on"
             )
         })
-        .unwrap_or(false);
-    if !enabled {
+        .unwrap_or(false)
+}
+
+fn maybe_run_pi_startup_self_test() {
+    if !env_flag_enabled("VOICESTREAM_PI_STARTUP_TEST") {
         return;
     }
 
@@ -1559,24 +1563,31 @@ pub fn run() {
 
             #[cfg(desktop)]
             {
-                native_hud::initialize(&app.handle());
-                let dictation_shortcut =
-                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
+                if env_flag_enabled(DISABLE_GLOBAL_SHORTCUTS_ENV) {
+                    eprintln!(
+                        "[voicestream] global shortcuts disabled by {}",
+                        DISABLE_GLOBAL_SHORTCUTS_ENV
+                    );
+                } else {
+                    native_hud::initialize(&app.handle());
+                    let dictation_shortcut =
+                        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
 
-                app.handle().plugin(
-                    tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcut(dictation_shortcut.clone())?
-                        .with_handler(move |app, shortcut, event| {
-                            handle_global_shortcut(&dictation_shortcut, app, shortcut, event);
-                        })
-                        .build(),
-                )?;
+                    app.handle().plugin(
+                        tauri_plugin_global_shortcut::Builder::new()
+                            .with_shortcut(dictation_shortcut.clone())?
+                            .with_handler(move |app, shortcut, event| {
+                                handle_global_shortcut(&dictation_shortcut, app, shortcut, event);
+                            })
+                            .build(),
+                    )?;
 
-                let shortcuts = settings::runtime_shortcut_settings(&app.handle())?;
-                if let Err(error) =
-                    register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
-                {
-                    eprintln!("[voicestream] failed to register agent shortcut: {}", error);
+                    let shortcuts = settings::runtime_shortcut_settings(&app.handle())?;
+                    if let Err(error) =
+                        register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
+                    {
+                        eprintln!("[voicestream] failed to register agent shortcut: {}", error);
+                    }
                 }
             }
 
