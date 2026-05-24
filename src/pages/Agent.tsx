@@ -392,10 +392,10 @@ export default function Agent() {
                 key={task.id}
                 type="button"
                 className={[
-                  "grid w-full gap-1 rounded px-2 py-2 text-left transition-[background-color,color] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper-accent",
+                  "list-item-alive grid w-full gap-1 rounded px-2 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-paper-accent",
                   selectedAgentTask?.id === task.id
-                    ? "bg-paper-ink/[0.06] text-paper-ink"
-                    : "text-paper-ink/80 hover:bg-paper-ink/[0.03]",
+                    ? "border-l-2 border-paper-accent bg-paper-ink/[0.06] pl-[calc(0.5rem-2px)] text-paper-ink"
+                    : "border-l-2 border-transparent text-paper-ink/80 hover:bg-paper-ink/[0.03]",
                 ].join(" ")}
                 onClick={() => setSelectedAgentTaskId(task.id)}
               >

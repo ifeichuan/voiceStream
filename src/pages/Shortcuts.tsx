@@ -39,7 +39,7 @@ export default function Shortcuts() {
   return (
     <div className="grid gap-12 pt-[2vh]">
       <section>
-        <h3 className="text-base font-semibold tracking-[-0.03em]">快捷键</h3>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">快捷键</h3>
         <p className="mt-1.5 text-[0.86rem] text-paper-muted">全局快捷键设置。</p>
 
         <div className="mt-8 grid gap-0">
