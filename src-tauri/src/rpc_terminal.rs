@@ -95,6 +95,12 @@ pub fn start(app: AppHandle, config: RpcTerminalConfig) -> Result<(), String> {
             command.arg(model.trim());
         }
     }
+    if let Some(provider) = &config.provider {
+        if !provider.trim().is_empty() {
+            command.arg("--provider");
+            command.arg(provider.trim());
+        }
+    }
     if let Some(thinking) = &config.thinking {
         if !thinking.trim().is_empty() {
             command.arg("--thinking");

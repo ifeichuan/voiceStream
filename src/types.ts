@@ -83,11 +83,18 @@ export interface PiSettingsView {
   thinking: string;
 }
 
+export interface AgentSettingsView {
+  provider: string;
+  model: string;
+  thinking: string;
+}
+
 export interface AppSettingsView {
   stt: SttSettingsView;
   pi: PiSettingsView;
   shortcuts: ShortcutSettingsView;
   local_pi: LocalPiConfigView;
+  agent: AgentSettingsView;
 }
 
 export interface ShortcutSettingsView {

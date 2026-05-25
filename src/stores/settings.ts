@@ -10,12 +10,14 @@ import type {
   ShortcutSettingsView,
   LocalPiConfigView,
   AppSettingsView,
+  AgentSettingsView,
 } from "../types";
 
 interface SettingsState {
   sttSettings: SttSettingsView;
   sttProviders: SttProviderMeta[];
   piSettings: PiSettingsView;
+  agentSettings: AgentSettingsView;
   shortcutSettings: ShortcutSettingsView;
   localPi: LocalPiConfigView;
   apiKeyInput: string;
@@ -24,6 +26,7 @@ interface SettingsState {
 
   setSttSettings: (fn: (prev: SttSettingsView) => SttSettingsView) => void;
   setPiSettings: (fn: (prev: PiSettingsView) => PiSettingsView) => void;
+  setAgentSettings: (fn: (prev: AgentSettingsView) => AgentSettingsView) => void;
   setShortcutSettings: (fn: (prev: ShortcutSettingsView) => ShortcutSettingsView) => void;
   setLocalPi: (v: LocalPiConfigView) => void;
   setApiKeyInput: (v: string) => void;
@@ -56,6 +59,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     provider_json: "",
     thinking: "",
   },
+  agentSettings: {
+    provider: "",
+    model: "",
+    thinking: "",
+  },
   shortcutSettings: {
     dictation_shortcut: DEFAULT_SHORTCUT,
     agent_shortcut: DEFAULT_AGENT_SHORTCUT,
@@ -75,6 +83,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setSttSettings: (fn) => set((s) => ({ sttSettings: fn(s.sttSettings) })),
   setPiSettings: (fn) => set((s) => ({ piSettings: fn(s.piSettings) })),
+  setAgentSettings: (fn) => set((s) => ({ agentSettings: fn(s.agentSettings) })),
   setShortcutSettings: (fn) => set((s) => ({ shortcutSettings: fn(s.shortcutSettings) })),
   setLocalPi: (v) => set({ localPi: v }),
   setApiKeyInput: (v) => set({ apiKeyInput: v }),
@@ -91,6 +100,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         sttSettings: settings.stt,
         sttProviders: providers,
         piSettings: { ...settings.pi, mode: normalizePiMode(settings.pi.mode) },
+        agentSettings: settings.agent,
         shortcutSettings: settings.shortcuts,
         localPi: settings.local_pi,
         settingsStatus: settings.stt.has_api_key ? "已保存到本地" : "未配置 API Key",
@@ -102,7 +112,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   saveSettings: async () => {
     const addLog = useLogsStore.getState().addLog;
-    const { sttSettings, piSettings, shortcutSettings, apiKeyInput } = get();
+    const { sttSettings, piSettings, agentSettings, shortcutSettings, apiKeyInput } = get();
     try {
       const saved = await invoke<AppSettingsView>("save_app_settings", {
         settings: {
@@ -128,11 +138,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           shortcuts: {
             agent_shortcut: shortcutSettings.agent_shortcut,
           },
+          agent: {
+            provider: agentSettings.provider,
+            model: agentSettings.model,
+            thinking: agentSettings.thinking,
+          },
         },
       });
       set({
         sttSettings: saved.stt,
         piSettings: { ...saved.pi, mode: normalizePiMode(saved.pi.mode) },
+        agentSettings: saved.agent,
         shortcutSettings: saved.shortcuts,
         localPi: saved.local_pi,
         apiKeyInput: "",
