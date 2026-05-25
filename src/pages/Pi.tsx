@@ -3,7 +3,8 @@ import { useSettingsStore } from "../stores/settings";
 import { PI_MODES, PROMPT_TEMPLATES, THINKING_LEVELS } from "../lib/constants";
 
 export default function Pi() {
-  const { piSettings, setPiSettings, localPi } = useSettingsStore();
+  const { piSettings, setPiSettings, agentSettings, setAgentSettings, localPi } =
+    useSettingsStore();
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const selectedProvider = useMemo(
@@ -21,6 +22,16 @@ export default function Pi() {
   const isManualProvider = useMemo(
     () => !piSettings.provider || !localPi.providers.some((p) => p.id === piSettings.provider),
     [localPi.providers, piSettings.provider],
+  );
+
+  const selectedAgentProvider = useMemo(
+    () => localPi.providers.find((p) => p.id === agentSettings.provider),
+    [localPi.providers, agentSettings.provider],
+  );
+  const isManualAgentProvider = useMemo(
+    () =>
+      !agentSettings.provider || !localPi.providers.some((p) => p.id === agentSettings.provider),
+    [localPi.providers, agentSettings.provider],
   );
 
   const applyProviderFromLocal = (providerId: string) => {
@@ -47,6 +58,15 @@ export default function Pi() {
                 2,
               )
             : "",
+    }));
+  };
+
+  const applyAgentProviderFromLocal = (providerId: string) => {
+    const provider = localPi.providers.find((item) => item.id === providerId);
+    setAgentSettings((prev) => ({
+      ...prev,
+      provider: providerId,
+      model: provider?.models[0]?.id ?? "",
     }));
   };
 
@@ -160,6 +180,116 @@ export default function Pi() {
                 onChange={(e) => setPiSettings((prev) => ({ ...prev, thinking: e.target.value }))}
               >
                 {THINKING_LEVELS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Agent mode settings */}
+      <section>
+        <h3 className="text-base font-semibold tracking-[-0.03em]">Agent 模式</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">
+          Agent 任务使用的模型配置，留空则使用上方整理模式的配置。
+        </p>
+
+        <div className="mt-8 grid gap-0">
+          {/* Agent Provider */}
+          <div className="form-row">
+            <span className="form-row-label">服务商</span>
+            <div className="form-row-control">
+              <select
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={isManualAgentProvider ? "" : agentSettings.provider}
+                onChange={(e) => applyAgentProviderFromLocal(e.target.value)}
+              >
+                <option value="">跟随整理模式</option>
+                {fileProviders.length > 0 && (
+                  <optgroup label="本机 models.json">
+                    {fileProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.id}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {nativeProviders.length > 0 && (
+                  <optgroup label="Pi 原生可用">
+                    {nativeProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.id}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {isManualAgentProvider && agentSettings.provider && (
+                <input
+                  className="mt-2 w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  type="text"
+                  value={agentSettings.provider}
+                  onChange={(e) =>
+                    setAgentSettings((prev) => ({ ...prev, provider: e.target.value }))
+                  }
+                  placeholder="例如：github-copilot"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Agent Model */}
+          <div className="form-row">
+            <span className="form-row-label">模型</span>
+            <div className="form-row-control">
+              {selectedAgentProvider && selectedAgentProvider.models.length > 0 ? (
+                <select
+                  className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  value={
+                    selectedAgentProvider.models.some((m) => m.id === agentSettings.model)
+                      ? agentSettings.model
+                      : ""
+                  }
+                  onChange={(e) =>
+                    setAgentSettings((prev) => ({ ...prev, model: e.target.value || prev.model }))
+                  }
+                >
+                  {selectedAgentProvider.models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name !== model.id ? `${model.name} (${model.id})` : model.id}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                  type="text"
+                  value={agentSettings.model}
+                  onChange={(e) =>
+                    setAgentSettings((prev) => ({ ...prev, model: e.target.value }))
+                  }
+                  placeholder={piSettings.model || "跟随整理模式"}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Agent Thinking level */}
+          <div className="form-row">
+            <span className="form-row-label">推理等级</span>
+            <div className="form-row-control">
+              <select
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={agentSettings.thinking}
+                onChange={(e) =>
+                  setAgentSettings((prev) => ({ ...prev, thinking: e.target.value }))
+                }
+              >
+                <option value="">跟随整理模式</option>
+                {THINKING_LEVELS.filter((o) => o.value !== "").map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

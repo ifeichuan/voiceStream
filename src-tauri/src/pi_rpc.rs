@@ -419,6 +419,10 @@ fn spawn_pi_rpc() -> Result<
 
     log_launch(&pi_path, &app_root, &config, &runtime);
 
+    // Dictation path: suppress voice feedback. Agent path overrides this in
+    // spawn_pi_rpc_for_agent_session.
+    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
+
     spawn_command(command)
 }
 
@@ -435,7 +439,7 @@ fn spawn_pi_rpc_for_agent_session(
 > {
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
-    let runtime = settings::runtime_pi_settings();
+    let runtime = settings::runtime_agent_settings();
     let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root)?;
     let mut command = Command::new(&pi_path);
 
@@ -477,7 +481,7 @@ pub(crate) fn agent_terminal_command_parts(
 ) -> Result<(PathBuf, PathBuf, Vec<String>), String> {
     let pi_path = resolve_pi_path();
     let app_root = resolve_app_root()?;
-    let runtime = settings::runtime_pi_settings();
+    let runtime = settings::runtime_agent_settings();
     let config = PiRpcLaunchConfig::for_mode(PiRpcLaunchMode::AgentSession, &app_root)?;
     let mut args = vec!["--session".to_string(), session_path.display().to_string()];
 
@@ -673,7 +677,6 @@ fn spawn_command(
     ),
     String,
 > {
-    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
     command.env("TERM", "xterm-256color");
 
     if let Ok(home) = std::env::var("HOME") {
