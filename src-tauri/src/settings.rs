@@ -60,10 +60,19 @@ pub struct PiSettingsInput {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentSettingsInput {
+    pub provider: String,
+    pub model: String,
+    pub thinking: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettingsInput {
     pub stt: SttSettingsInput,
     pub pi: PiSettingsInput,
     pub shortcuts: ShortcutSettingsInput,
+    #[serde(default)]
+    pub agent: Option<AgentSettingsInput>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -83,11 +92,19 @@ pub struct PiSettingsView {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentSettingsView {
+    pub provider: String,
+    pub model: String,
+    pub thinking: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettingsView {
     pub stt: SttSettingsView,
     pub pi: PiSettingsView,
     pub shortcuts: ShortcutSettingsView,
     pub local_pi: LocalPiConfigView,
+    pub agent: AgentSettingsView,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -176,12 +193,24 @@ struct StoredShortcutSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct StoredAgentSettings {
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    thinking: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct StoredAppSettings {
     version: u32,
     stt: StoredSttSettings,
     pi: StoredPiSettings,
     #[serde(default = "default_shortcuts_settings")]
     shortcuts: StoredShortcutSettings,
+    #[serde(default = "default_agent_settings")]
+    agent: StoredAgentSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -202,6 +231,7 @@ pub fn load_app_settings_view(app: &AppHandle) -> Result<AppSettingsView, String
         pi: pi_view_from_stored(&stored.pi),
         shortcuts: shortcuts_view_from_stored(&stored.shortcuts),
         local_pi: read_local_pi_config(),
+        agent: agent_view_from_stored(&stored.agent),
     })
 }
 
@@ -215,6 +245,7 @@ pub fn save_app_settings(
         stt: merge_stt_settings(Some(existing.stt), input.stt),
         pi: merge_pi_settings(Some(existing.pi), input.pi),
         shortcuts: merge_shortcut_settings(Some(existing.shortcuts), input.shortcuts),
+        agent: merge_agent_settings(Some(existing.agent), input.agent),
     };
     write_app_settings(app, &next)?;
     load_app_settings_view(app)
@@ -234,6 +265,7 @@ pub fn save_stt_settings(
         stt: merge_stt_settings(Some(existing.stt), input),
         pi: existing.pi,
         shortcuts: existing.shortcuts,
+        agent: existing.agent,
     };
     write_app_settings(app, &next)?;
     Ok(stt_view_from_stored(&next.stt))
@@ -311,6 +343,23 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
     }
 }
 
+pub fn runtime_agent_settings() -> RuntimePiSettings {
+    let pi = runtime_pi_settings();
+    let stored = read_runtime_settings_file().unwrap_or_else(|_| default_app_settings());
+    let agent = &stored.agent;
+
+    let provider = sanitize(&agent.provider).unwrap_or(pi.provider);
+    let model = sanitize(&agent.model).unwrap_or(pi.model);
+    let thinking = sanitize(&agent.thinking).unwrap_or(pi.thinking);
+
+    RuntimePiSettings {
+        provider,
+        model,
+        thinking,
+        ..pi
+    }
+}
+
 pub fn runtime_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettingsView, String> {
     let stored = read_or_migrate_settings(app)?;
     Ok(shortcuts_view_from_stored(&stored.shortcuts))
@@ -367,6 +416,14 @@ fn shortcuts_view_from_stored(stored: &StoredShortcutSettings) -> ShortcutSettin
     }
 }
 
+fn agent_view_from_stored(stored: &StoredAgentSettings) -> AgentSettingsView {
+    AgentSettingsView {
+        provider: stored.provider.clone(),
+        model: stored.model.clone(),
+        thinking: stored.thinking.clone(),
+    }
+}
+
 fn merge_stt_settings(
     existing: Option<StoredSttSettings>,
     input: SttSettingsInput,
@@ -417,6 +474,21 @@ fn merge_shortcut_settings(
     }
 }
 
+fn merge_agent_settings(
+    existing: Option<StoredAgentSettings>,
+    input: Option<AgentSettingsInput>,
+) -> StoredAgentSettings {
+    let existing = existing.unwrap_or_else(default_agent_settings);
+    let Some(input) = input else {
+        return existing;
+    };
+    StoredAgentSettings {
+        provider: input.provider.trim().to_string(),
+        model: input.model.trim().to_string(),
+        thinking: input.thinking.trim().to_string(),
+    }
+}
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -445,6 +517,7 @@ fn read_or_migrate_settings(app: &AppHandle) -> Result<StoredAppSettings, String
             stt: legacy,
             pi: default_pi_settings(),
             shortcuts: default_shortcuts_settings(),
+            agent: default_agent_settings(),
         };
         write_app_settings(app, &migrated)?;
         return Ok(migrated);
@@ -515,6 +588,7 @@ fn default_app_settings() -> StoredAppSettings {
         stt: default_stt_settings(),
         pi: default_pi_settings(),
         shortcuts: default_shortcuts_settings(),
+        agent: default_agent_settings(),
     }
 }
 
@@ -546,6 +620,14 @@ fn default_pi_settings() -> StoredPiSettings {
 fn default_shortcuts_settings() -> StoredShortcutSettings {
     StoredShortcutSettings {
         agent_shortcut: DEFAULT_AGENT_SHORTCUT.to_string(),
+    }
+}
+
+fn default_agent_settings() -> StoredAgentSettings {
+    StoredAgentSettings {
+        provider: String::new(),
+        model: String::new(),
+        thinking: String::new(),
     }
 }
 
