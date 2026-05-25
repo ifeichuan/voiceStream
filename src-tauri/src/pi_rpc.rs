@@ -530,7 +530,7 @@ fn apply_launch_flags(command: &mut Command, config: &PiRpcLaunchConfig) {
         command.arg("--no-themes");
     }
     if matches!(config.mode, PiRpcLaunchMode::DictationFast) {
-        command.arg("--thinking").arg("none");
+        command.arg("--thinking").arg("off");
     }
     for extension in &config.extension_paths {
         command.arg("-e").arg(extension);
@@ -560,7 +560,7 @@ fn push_launch_args(args: &mut Vec<String>, config: &PiRpcLaunchConfig) {
     }
     if matches!(config.mode, PiRpcLaunchMode::DictationFast) {
         args.push("--thinking".to_string());
-        args.push("none".to_string());
+        args.push("off".to_string());
     }
     for extension in &config.extension_paths {
         args.push("-e".to_string());
