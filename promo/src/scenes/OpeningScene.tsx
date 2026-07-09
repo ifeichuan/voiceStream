@@ -37,7 +37,7 @@ export const OpeningScene: React.FC = () => {
           fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
           letterSpacing: -2,
         }}>
-          VoiceStream
+          SpeakMore
         </h1>
       </div>
 

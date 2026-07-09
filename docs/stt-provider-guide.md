@@ -1,6 +1,6 @@
 # STT Provider 适配指南与验证矩阵
 
-本文档记录 VoiceStream 实时 STT provider 的适配规范，供维护者新增 provider 时参考。
+本文档记录 SpeakMore 实时 STT provider 的适配规范，供维护者新增 provider 时参考。
 
 ## 已支持 Provider 概览
 
@@ -112,7 +112,7 @@ src-tauri/src/
 
 ### 统一语义映射
 
-VoiceStream 内部使用以下统一语义：
+SpeakMore 内部使用以下统一语义：
 
 - **partial**: 当前正在识别的中间文本，随时可能被替换
 - **final**: 已确认的最终文本片段，不会再变

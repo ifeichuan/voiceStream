@@ -1,18 +1,18 @@
 <div align="center">
 
 <picture>
-  <img alt="VoiceStream" src="src-tauri/icons/icon.png" width="128" height="128">
+  <img alt="SpeakMore" src="src-tauri/icons/icon.png" width="128" height="128">
 </picture>
 
-### VoiceStream: Voice-Driven Everything
+### SpeakMore: Voice-Driven Everything
 
 **Just Speak. Get Things Done.**
 
 Turn your voice into text, refined output, or background agent tasks on your Mac.
 
-<a href="./quick-start.md">Quick Start</a> · <a href="./ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/anthropics/voicestream/issues">Issues</a> · <a href="./docs">Docs</a>
+<a href="./quick-start.md">Quick Start</a> · <a href="./ARCHITECTURE.md">Architecture</a> · <a href="https://github.com/anthropics/speakmore/issues">Issues</a> · <a href="./docs">Docs</a>
 
-[![](https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white)](https://github.com/anthropics/voicestream)
+[![](https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white)](https://github.com/anthropics/speakmore)
 [![](https://img.shields.io/badge/license-MIT-white?labelColor=black&style=flat-square)](./LICENSE)
 [![](https://img.shields.io/badge/tauri-2.0-369eff?labelColor=black&style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![](https://img.shields.io/badge/rust-2021-c4f042?labelColor=black&style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -29,7 +29,7 @@ English / [中文](./README.md)
 
 <div align="center">
 
-[![VoiceStream Promo](https://img.shields.io/badge/▶_Watch_Promo-Bilibili-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1wYGo6cEic/?vd_source=c0c5db05014578f493b993d4b1d3e6fc)
+[![SpeakMore Promo](https://img.shields.io/badge/▶_Watch_Promo-Bilibili-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1wYGo6cEic/?vd_source=c0c5db05014578f493b993d4b1d3e6fc)
 
 </div>
 
@@ -46,7 +46,7 @@ The event requires all commits to fall between May 22–25, 2026. Commits before
 <details>
 <summary><strong>Q: Project Background</strong></summary>
 
-VoiceStream is a pre-existing repository that was refined and documented during the 3-day event window (May 22–25).
+SpeakMore is a pre-existing repository that was refined and documented during the 3-day event window (May 22–25).
 </details>
 
 <details>
@@ -83,9 +83,9 @@ The reused code is the entire pre-existing repository codebase. Additionally, th
 
 ## Overview
 
-Inspired by [Typeless](https://www.typeless.com/), OpenTypeless, and [Type4Me](https://github.com/joewongjc/type4me) — VoiceStream goes further: if voice can refine text, why not let it execute tasks?
+Inspired by [Typeless](https://www.typeless.com/), OpenTypeless, and [Type4Me](https://github.com/joewongjc/type4me) — SpeakMore goes further: if voice can refine text, why not let it execute tasks?
 
-Rather than reinventing the wheel, VoiceStream reuses your local Coding CLI as the AI backend. Pi is the first-class integration, chosen for its complete extension system (tool use, session persistence, extension loading).
+Rather than reinventing the wheel, SpeakMore reuses your local Coding CLI as the AI backend. Pi is the first-class integration, chosen for its complete extension system (tool use, session persistence, extension loading).
 
 > **Recommended Setup:** In our testing, DeepSeek V4 Flash with No Thinking mode averages 1–2 second response times for text refinement — ideal for frequent short dictation. Chinese-native models excel in Chinese language contexts.
 
@@ -103,7 +103,7 @@ Both modes display a native floating HUD with real-time transcription and wavefo
 ## Home
 
 <p align="center">
-  <img src="docs/index.png" width="720" alt="VoiceStream Home" />
+  <img src="docs/index.png" width="720" alt="SpeakMore Home" />
 </p>
 
 The homepage features a WebGL2 shader orb that responds to microphone volume in real time. Below it are recent transcription records. The footer shows current shortcut bindings — press and start talking.
@@ -116,7 +116,7 @@ The homepage features a WebGL2 shader orb that responds to microphone volume in 
   <img src="docs/agent.png" width="720" alt="Agent Tasks" />
 </p>
 
-After giving a voice command, VoiceStream creates an Agent task and executes it in the background. The left panel shows the task list (with status and timestamps), the right panel shows live terminal output — you can see what the Pi agent is doing, which tools it's calling, and what results it produces. On completion, results are spoken aloud via macOS `say`.
+After giving a voice command, SpeakMore creates an Agent task and executes it in the background. The left panel shows the task list (with status and timestamps), the right panel shows live terminal output — you can see what the Pi agent is doing, which tools it's calling, and what results it produces. On completion, results are spoken aloud via macOS `say`.
 
 ---
 
@@ -141,7 +141,7 @@ Pi settings are split into two sections:
 - **Refinement mode**: For post-dictation text polishing. Choose provider, model, and thinking level.
 - **Agent mode**: For voice Agent tasks. Can be configured with a stronger model independently (e.g., GPT-5.4), or left empty to follow refinement mode settings.
 
-VoiceStream automatically reads `settings.json` and `models.json` from `~/.pi/agent/` — configured providers and models appear directly in the dropdowns.
+SpeakMore automatically reads `settings.json` and `models.json` from `~/.pi/agent/` — configured providers and models appear directly in the dropdowns.
 
 ---
 
@@ -243,20 +243,20 @@ src/
 └── hooks/              # Tauri event subscriptions
 
 pi-extensions/
-└── voicestream-notify.ts  # Pi extension: AI summary + speech
+└── speakmore-notify.ts  # Pi extension: AI summary + speech
 ```
 
 ## Configuration
 
-Settings stored at `~/Library/Application Support/com.voicestream.app/app-settings.json` (permissions 0600).
+Settings stored at `~/Library/Application Support/com.speakmore.app/app-settings.json` (permissions 0600).
 
 Environment variable overrides:
-- `VOICESTREAM_PI_PROVIDER` — force Pi provider
-- `VOICESTREAM_PI_MODEL` — force Pi model
-- `VOICESTREAM_PI_MODE` — force Pi mode
-- `VOICESTREAM_PI_REUSE_PROCESS` — toggle process reuse
-- `VOICESTREAM_PI_PATH` — custom Pi binary path
-- `VOICESTREAM_PI_THINKING` — thinking level override
+- `SPEAKMORE_PI_PROVIDER` — force Pi provider
+- `SPEAKMORE_PI_MODEL` — force Pi model
+- `SPEAKMORE_PI_MODE` — force Pi mode
+- `SPEAKMORE_PI_REUSE_PROCESS` — toggle process reuse
+- `SPEAKMORE_PI_PATH` — custom Pi binary path
+- `SPEAKMORE_PI_THINKING` — thinking level override
 
 ## License
 

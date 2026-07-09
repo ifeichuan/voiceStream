@@ -9,7 +9,7 @@ const PROVIDERS = [
   'openai / gpt-4o-mini',
   'deepseek / chat',
 ];
-const DICT_WORDS = ['VoiceStream', 'Tauri', 'Pi RPC', 'OKLCH', 'Remotion'];
+const DICT_WORDS = ['SpeakMore', 'Tauri', 'Pi RPC', 'OKLCH', 'Remotion'];
 
 interface ColumnProps {
   title: string;

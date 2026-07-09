@@ -3776,6 +3776,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "speakmore"
+version = "1.1.2"
+dependencies = [
+ "arboard",
+ "base64 0.22.1",
+ "core-graphics",
+ "cpal",
+ "futures-util",
+ "http",
+ "native-tls",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "portable-pty",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-tungstenite",
+ "url",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4748,34 +4776,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "voicestream"
-version = "1.1.2"
-dependencies = [
- "arboard",
- "base64 0.22.1",
- "core-graphics",
- "cpal",
- "futures-util",
- "http",
- "native-tls",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-quartz-core",
- "portable-pty",
- "rusqlite",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tokio",
- "tokio-native-tls",
- "tokio-tungstenite",
- "url",
-]
 
 [[package]]
 name = "vswhom"

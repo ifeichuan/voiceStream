@@ -1,18 +1,18 @@
 <div align="center">
 
 <picture>
-  <img alt="VoiceStream" src="src-tauri/icons/icon.png" width="128" height="128">
+  <img alt="SpeakMore" src="src-tauri/icons/icon.png" width="128" height="128">
 </picture>
 
-### VoiceStream: 用语音驱动一切
+### SpeakMore: 用语音驱动一切
 
 **Just Speak. Get Things Done.**
 
 在 Mac 上，用语音输入文字、润色内容、或在后台执行 Agent 任务。
 
-<a href="./quick-start.md">快速开始</a> · <a href="./ARCHITECTURE.md">架构文档</a> · <a href="https://github.com/anthropics/voicestream/issues">Issues</a> · <a href="./docs">文档</a>
+<a href="./quick-start.md">快速开始</a> · <a href="./ARCHITECTURE.md">架构文档</a> · <a href="https://github.com/anthropics/speakmore/issues">Issues</a> · <a href="./docs">文档</a>
 
-[![](https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white)](https://github.com/anthropics/voicestream)
+[![](https://img.shields.io/badge/platform-macOS-black?style=flat-square&logo=apple&logoColor=white)](https://github.com/anthropics/speakmore)
 [![](https://img.shields.io/badge/license-MIT-white?labelColor=black&style=flat-square)](./LICENSE)
 [![](https://img.shields.io/badge/tauri-2.0-369eff?labelColor=black&style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![](https://img.shields.io/badge/rust-2021-c4f042?labelColor=black&style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -29,7 +29,7 @@
 
 <div align="center">
 
-[![VoiceStream 宣传视频](https://img.shields.io/badge/▶_观看宣传视频-Bilibili-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1wYGo6cEic/?vd_source=c0c5db05014578f493b993d4b1d3e6fc)
+[![SpeakMore 宣传视频](https://img.shields.io/badge/▶_观看宣传视频-Bilibili-00A1D6?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1wYGo6cEic/?vd_source=c0c5db05014578f493b993d4b1d3e6fc)
 
 </div>
 
@@ -46,7 +46,7 @@
 <details>
 <summary><strong>Q: 项目背景</strong></summary>
 
-VoiceStream 是一个原先就存在的 repo，在本次活动的三天时间内（5.22–5.25）对其进行了功能完善和文档整理。
+SpeakMore 是一个原先就存在的 repo，在本次活动的三天时间内（5.22–5.25）对其进行了功能完善和文档整理。
 </details>
 
 <details>
@@ -83,9 +83,9 @@ VoiceStream 是一个原先就存在的 repo，在本次活动的三天时间内
 
 ## 概述
 
-受 [Typeless](https://www.typeless.com/)、OpenTypeless 和 [Type4Me](https://github.com/joewongjc/type4me) 启发——VoiceStream 更进一步：既然语音可以润色文本，为什么不能用语音来执行任务？
+受 [Typeless](https://www.typeless.com/)、OpenTypeless 和 [Type4Me](https://github.com/joewongjc/type4me) 启发——SpeakMore 更进一步：既然语音可以润色文本，为什么不能用语音来执行任务？
 
-基于不重复造轮子的理念，VoiceStream 复用本机现有的 Coding CLI 作为 AI 后端。目前以 Pi 作为第一方支持，因为它提供了最完整的扩展体系（工具调用、会话持久化、扩展加载）。
+基于不重复造轮子的理念，SpeakMore 复用本机现有的 Coding CLI 作为 AI 后端。目前以 Pi 作为第一方支持，因为它提供了最完整的扩展体系（工具调用、会话持久化、扩展加载）。
 
 > **推荐配置：** 经实测，使用 DeepSeek V4 Flash + No Thinking 模式做文本润色，平均响应时间在 1–2 秒以内，非常适合高频短文本听写场景。国产模型在中文语境下表现尤为出色。
 
@@ -103,7 +103,7 @@ VoiceStream 是一个原先就存在的 repo，在本次活动的三天时间内
 ## 首页
 
 <p align="center">
-  <img src="docs/index.png" width="720" alt="VoiceStream 首页" />
+  <img src="docs/index.png" width="720" alt="SpeakMore 首页" />
 </p>
 
 首页中央是一个 WebGL2 shader 动画球体，响应麦克风音量实时律动。下方展示最近的语音转录记录。底部显示当前快捷键配置——按下即可开始说话，无需任何额外操作。
@@ -116,7 +116,7 @@ VoiceStream 是一个原先就存在的 repo，在本次活动的三天时间内
   <img src="docs/agent.png" width="720" alt="Agent 任务页面" />
 </p>
 
-用语音下达指令后，VoiceStream 会创建一个 Agent 任务并在后台执行。左侧是任务列表（含状态和时间戳），右侧是实时终端输出——你可以看到 Pi agent 正在执行什么操作、调用了哪些工具、产生了什么结果。任务完成后会通过 macOS `say` 语音播报摘要。
+用语音下达指令后，SpeakMore 会创建一个 Agent 任务并在后台执行。左侧是任务列表（含状态和时间戳），右侧是实时终端输出——你可以看到 Pi agent 正在执行什么操作、调用了哪些工具、产生了什么结果。任务完成后会通过 macOS `say` 语音播报摘要。
 
 ---
 
@@ -141,7 +141,7 @@ Pi 设置分为两部分：
 - **整理模式**：用于听写后的文本润色。可选择服务商、模型和推理等级。图中使用 DeepSeek V4 Flash 做快速整理。
 - **Agent 模式**：用于语音 Agent 任务。可独立配置更强的模型（如 GPT-5.4），留空则跟随整理模式的配置。
 
-VoiceStream 会自动读取本机 `~/.pi/agent/` 下的 `settings.json` 和 `models.json`，已配置的服务商和模型会直接出现在下拉列表中。
+SpeakMore 会自动读取本机 `~/.pi/agent/` 下的 `settings.json` 和 `models.json`，已配置的服务商和模型会直接出现在下拉列表中。
 
 ---
 
@@ -243,20 +243,20 @@ src/
 └── hooks/              # Tauri 事件订阅
 
 pi-extensions/
-└── voicestream-notify.ts  # Pi 扩展：AI 摘要 + 语音播报
+└── speakmore-notify.ts  # Pi 扩展：AI 摘要 + 语音播报
 ```
 
 ## 配置
 
-设置文件位于 `~/Library/Application Support/com.voicestream.app/app-settings.json`（权限 0600）。
+设置文件位于 `~/Library/Application Support/com.speakmore.app/app-settings.json`（权限 0600）。
 
 环境变量覆盖：
-- `VOICESTREAM_PI_PROVIDER` — 强制指定 Pi 服务商
-- `VOICESTREAM_PI_MODEL` — 强制指定 Pi 模型
-- `VOICESTREAM_PI_MODE` — 强制指定 Pi 模式
-- `VOICESTREAM_PI_REUSE_PROCESS` — 是否复用进程
-- `VOICESTREAM_PI_PATH` — 自定义 Pi 二进制路径
-- `VOICESTREAM_PI_THINKING` — 推理等级覆盖
+- `SPEAKMORE_PI_PROVIDER` — 强制指定 Pi 服务商
+- `SPEAKMORE_PI_MODEL` — 强制指定 Pi 模型
+- `SPEAKMORE_PI_MODE` — 强制指定 Pi 模式
+- `SPEAKMORE_PI_REUSE_PROCESS` — 是否复用进程
+- `SPEAKMORE_PI_PATH` — 自定义 Pi 二进制路径
+- `SPEAKMORE_PI_THINKING` — 推理等级覆盖
 
 ## 许可证
 

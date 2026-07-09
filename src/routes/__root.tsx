@@ -66,7 +66,7 @@ function RootLayout() {
                   : "bg-paper-accent",
               ].join(" ")}
             />
-            <span className="text-[0.84rem] font-semibold tracking-[-0.02em]">VoiceStream</span>
+            <span className="text-[0.84rem] font-semibold tracking-[-0.02em]">SpeakMore</span>
           </div>
 
           <nav className="mt-3 flex flex-col gap-0.5" aria-label="主导航">

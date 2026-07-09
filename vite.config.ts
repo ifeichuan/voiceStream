@@ -24,10 +24,10 @@ const parsePort = (value: string | undefined, fallback: number) => {
 
 const host = process.env.TAURI_DEV_HOST;
 const devPort = parsePort(
-  process.env.VOICESTREAM_DEV_PORT ?? process.env.VITE_PORT ?? process.env.PORT,
+  process.env.SPEAKMORE_DEV_PORT ?? process.env.VITE_PORT ?? process.env.PORT,
   DEFAULT_DEV_PORT,
 );
-const hmrPort = parsePort(process.env.VOICESTREAM_HMR_PORT, devPort + 1);
+const hmrPort = parsePort(process.env.SPEAKMORE_HMR_PORT, devPort + 1);
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({

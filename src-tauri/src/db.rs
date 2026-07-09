@@ -10,7 +10,7 @@ pub fn initialize(app_data_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(app_data_dir)
         .map_err(|e| format!("failed to create app data dir: {}", e))?;
 
-    let db_path = app_data_dir.join("voicestream.db");
+    let db_path = app_data_dir.join("speakmore.db");
     let conn = Connection::open(&db_path)
         .map_err(|e| format!("failed to open database: {}", e))?;
 

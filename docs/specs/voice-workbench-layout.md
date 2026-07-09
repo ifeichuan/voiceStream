@@ -1,8 +1,8 @@
-# VoiceStream Desktop Surface Spec
+# SpeakMore Desktop Surface Spec
 
 ## Goal
 
-VoiceStream is not a website and not a single full-screen voice editor.
+SpeakMore is not a website and not a single full-screen voice editor.
 
 It has two product surfaces:
 
@@ -11,7 +11,7 @@ It has two product surfaces:
 
 The management panel should be organized around `Dashboard` and `Settings`, with optional secondary pages for Agent and History if the information volume requires it.
 
-This spec replaces the earlier "web workbench" framing. Any previous reference that treats VoiceStream like a web landing page or a generic AI prompt screen should be treated as weak evidence.
+This spec replaces the earlier "web workbench" framing. Any previous reference that treats SpeakMore like a web landing page or a generic AI prompt screen should be treated as weak evidence.
 
 ## Evidence Base
 
@@ -59,7 +59,7 @@ Avoid:
 ## Product Model
 
 ```text
-VoiceStream
+SpeakMore
 ├─ Capsule
 │  ├─ appears during dictation
 │  ├─ shows waveform and live transcript
@@ -199,7 +199,7 @@ It should show:
 Desktop panel:
 
 ```text
-Header: VoiceStream status + quick actions
+Header: SpeakMore status + quick actions
 Main grid:
   Left: Pipeline status and latest dictation
   Right: Readiness checklist and active shortcuts

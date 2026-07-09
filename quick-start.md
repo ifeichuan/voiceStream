@@ -1,6 +1,6 @@
 # 快速开始
 
-本指南帮助你在 5 分钟内跑起 VoiceStream。
+本指南帮助你在 5 分钟内跑起 SpeakMore。
 
 ## 前置条件
 
@@ -14,8 +14,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/anthropics/voicestream.git
-cd voicestream
+git clone https://github.com/anthropics/speakmore.git
+cd speakmore
 
 # 安装前端依赖
 pnpm install
@@ -28,7 +28,7 @@ pnpm tauri dev
 
 ## 安装 Pi CLI
 
-VoiceStream 依赖本机的 Pi CLI 做文本润色和 Agent 任务执行。
+SpeakMore 依赖本机的 Pi CLI 做文本润色和 Agent 任务执行。
 
 ```bash
 # 通过 pnpm 全局安装
@@ -68,7 +68,7 @@ bun install -g @anthropics/pi
 
 ## 授予系统权限
 
-VoiceStream 需要两个系统权限：
+SpeakMore 需要两个系统权限：
 
 ### 麦克风权限
 首次录音时系统会自动弹窗请求，允许即可。
@@ -76,7 +76,7 @@ VoiceStream 需要两个系统权限：
 ### 辅助功能权限（重要）
 用于模拟 `Cmd+V` 粘贴。如果未授权，应用左下角会显示黄色警告。
 
-前往：**系统设置 → 隐私与安全性 → 辅助功能** → 勾选 VoiceStream。
+前往：**系统设置 → 隐私与安全性 → 辅助功能** → 勾选 SpeakMore。
 
 ## 开始使用
 
@@ -93,7 +93,7 @@ VoiceStream 需要两个系统权限：
 
 ### Agent 模式
 
-对着麦克风说出任务指令（如"帮我检查这个项目能不能构建"），VoiceStream 会：
+对着麦克风说出任务指令（如"帮我检查这个项目能不能构建"），SpeakMore 会：
 1. 创建 Agent 任务
 2. 启动 Pi agent session 在后台执行
 3. 完成后通过语音播报结果
@@ -117,7 +117,7 @@ VoiceStream 需要两个系统权限：
 在设置中点击「测试 STT」查看具体错误。常见原因：API Key 过期、网络不通、服务商端点错误。
 
 ### Pi 润色没有响应？
-确认 `pi --version` 可以正常运行。如果 Pi 未安装或路径不在 PATH 中，可通过环境变量 `VOICESTREAM_PI_PATH` 指定。
+确认 `pi --version` 可以正常运行。如果 Pi 未安装或路径不在 PATH 中，可通过环境变量 `SPEAKMORE_PI_PATH` 指定。
 
 ### 延迟太高？
 - 确认 Pi 设置中「复用进程」已开启

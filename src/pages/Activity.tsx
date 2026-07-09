@@ -13,7 +13,7 @@ export default function Activity() {
     <div className="grid gap-12 pt-[2vh]">
       <section>
         <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">通知</h3>
-        <p className="mt-1.5 text-[0.86rem] text-paper-muted">VoiceStream 语音通知。</p>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">SpeakMore 语音通知。</p>
 
         <div className="mt-6 grid gap-4">
           {agentNotifications.length === 0 && <div className="text-paper-muted">暂无通知。</div>}

@@ -2,7 +2,7 @@ use crate::settings;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const NEEDS_ATTENTION_ERROR_PREFIX: &str = "voicestream_needs_attention:";
+const NEEDS_ATTENTION_ERROR_PREFIX: &str = "speakmore_needs_attention:";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AskPromptPayload {
@@ -78,7 +78,7 @@ impl PiRpcLaunchConfig {
             PiRpcLaunchMode::AgentSession => {
                 let session_path = app_root.join(".pi/sessions/voice-dictation.jsonl");
                 let mut extension_paths = Vec::new();
-                if let Some(extension) = resolve_voicestream_notify_extension(app_root)? {
+                if let Some(extension) = resolve_speakmore_notify_extension(app_root)? {
                     extension_paths.push(extension);
                 }
 
@@ -447,7 +447,7 @@ fn spawn_pi_rpc() -> Result<
 
     // Dictation path: suppress voice feedback. Agent path overrides this in
     // spawn_pi_rpc_for_agent_session.
-    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "0");
+    command.env("SPEAKMORE_NOTIFY_AUTO_SAY", "0");
 
     spawn_command(command)
 }
@@ -495,9 +495,9 @@ fn spawn_pi_rpc_for_agent_session(
     );
     log_launch(&pi_path, &app_root, &config, &runtime);
 
-    // Allow the voicestream-notify extension to speak AI-generated summaries
+    // Allow the speakmore-notify extension to speak AI-generated summaries
     // via the agent_end event, so users hear a real summary instead of raw text.
-    command.env("VOICESTREAM_NOTIFY_AUTO_SAY", "1");
+    command.env("SPEAKMORE_NOTIFY_AUTO_SAY", "1");
 
     spawn_command(command)
 }
@@ -815,7 +815,7 @@ fn should_reuse_process() -> bool {
 }
 
 fn resolve_app_root() -> Result<PathBuf, String> {
-    if let Some(path) = env::var("VOICESTREAM_APP_ROOT")
+    if let Some(path) = env::var("SPEAKMORE_APP_ROOT")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -879,8 +879,8 @@ fn resolve_app_root() -> Result<PathBuf, String> {
     Ok(cwd)
 }
 
-fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBuf>, String> {
-    if let Some(path) = env::var("VOICESTREAM_PI_NOTIFY_EXTENSION")
+fn resolve_speakmore_notify_extension(app_root: &Path) -> Result<Option<PathBuf>, String> {
+    if let Some(path) = env::var("SPEAKMORE_PI_NOTIFY_EXTENSION")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -892,12 +892,12 @@ fn resolve_voicestream_notify_extension(app_root: &Path) -> Result<Option<PathBu
         }
 
         return Err(format!(
-            "notify extension from VOICESTREAM_PI_NOTIFY_EXTENSION not found at {}",
+            "notify extension from SPEAKMORE_PI_NOTIFY_EXTENSION not found at {}",
             path.display()
         ));
     }
 
-    let extension = app_root.join("pi-extensions/voicestream-notify.ts");
+    let extension = app_root.join("pi-extensions/speakmore-notify.ts");
     if extension.exists() {
         Ok(Some(extension))
     } else {
@@ -914,7 +914,7 @@ pub fn resolve_pi_path_public() -> PathBuf {
 }
 
 fn resolve_pi_path() -> PathBuf {
-    if let Ok(path) = env::var("VOICESTREAM_PI_PATH") {
+    if let Ok(path) = env::var("SPEAKMORE_PI_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
             return path;
@@ -1334,7 +1334,7 @@ fn run_agent_prompt_cycle(
 
 fn build_agent_task_prompt(transcript: &str) -> String {
     format!(
-        "你是 VoiceStream 的后台 Agent。用户刚通过语音明确发起了一个本地后台任务。\n\n执行要求：\n1. 把 <task> 中的内容当作真实任务执行，而不是当作要整理或粘贴的文字。\n2. 可以使用当前 Pi 环境可用的工具来读取、分析、修改或验证本地项目。\n3. 开始后直接行动；除非缺少关键安全信息，否则不要反问。\n4. 输出要包含简洁进展和最终结果。\n5. 如果任务失败，说明失败原因和已完成的部分。\n\n<task>\n{}\n</task>",
+        "你是 SpeakMore 的后台 Agent。用户刚通过语音明确发起了一个本地后台任务。\n\n执行要求：\n1. 把 <task> 中的内容当作真实任务执行，而不是当作要整理或粘贴的文字。\n2. 可以使用当前 Pi 环境可用的工具来读取、分析、修改或验证本地项目。\n3. 开始后直接行动；除非缺少关键安全信息，否则不要反问。\n4. 输出要包含简洁进展和最终结果。\n5. 如果任务失败，说明失败原因和已完成的部分。\n\n<task>\n{}\n</task>",
         transcript.trim()
     )
 }
@@ -1634,7 +1634,7 @@ mod tests {
 
     #[test]
     fn parses_needs_attention_error() {
-        let error = r#"voicestream_needs_attention: {"questions":[{"question":"继续吗？","header":"确认","options":[]}]}"#;
+        let error = r#"speakmore_needs_attention: {"questions":[{"question":"继续吗？","header":"确认","options":[]}]}"#;
         let prompt = parse_needs_attention_error(error).expect("prompt");
         assert_eq!(prompt.questions[0].question, "继续吗？");
     }
@@ -1643,7 +1643,7 @@ mod tests {
     #[ignore = "real rpc benchmark; run manually with cargo test pi_rpc_repeated_refine_same_text -- --ignored --nocapture"]
     fn pi_rpc_repeated_refine_same_text() {
         let sample = "让我们来测试一下，在同样文本下连续调用时，这条链路到底有多快。";
-        let rounds = std::env::var("VOICESTREAM_PI_BENCH_ROUNDS")
+        let rounds = std::env::var("SPEAKMORE_PI_BENCH_ROUNDS")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)

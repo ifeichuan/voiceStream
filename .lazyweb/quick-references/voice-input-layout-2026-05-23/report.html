@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VoiceStream Current UI Report</title>
+    <title>SpeakMore Current UI Report</title>
     <style>
       :root {
         color-scheme: light;
@@ -144,7 +144,7 @@
     <main>
       <header>
         <p class="meta">2026-05-23 · Current code first, Lazyweb second</p>
-        <h1>VoiceStream Current UI Report</h1>
+        <h1>SpeakMore Current UI Report</h1>
         <p class="muted">这版报告先看当前 <code>App.tsx</code> 和 <code>App.css</code>，再谈桌面应用结构和 Lazyweb 参考。</p>
       </header>
 
@@ -170,7 +170,7 @@ NAV_ITEMS:
       <div class="grid">
         <section class="box">
           <strong>Shell</strong>
-          <p>当前是 248px sidebar + scrollable main。左侧标题是 <code>VoiceStream / 语音设置</code>，主区 sticky header 永远显示 <code>测试 STT</code> 和 <code>保存设置</code>。</p>
+          <p>当前是 248px sidebar + scrollable main。左侧标题是 <code>SpeakMore / 语音设置</code>，主区 sticky header 永远显示 <code>测试 STT</code> 和 <code>保存设置</code>。</p>
         </section>
         <section class="box">
           <strong>视觉语言</strong>
@@ -203,7 +203,7 @@ NAV_ITEMS:
       <p>Activity 应拆成 Dashboard 摘要 + History。Dashboard 只看最近状态，History 才承载完整 transcript、logs、audio chunk。</p>
 
       <h2>产品模型纠偏</h2>
-      <pre>VoiceStream
+      <pre>SpeakMore
 ├─ Popup Capsule
 │  ├─ waveform
 │  ├─ live transcript
@@ -241,7 +241,7 @@ NAV_ITEMS:
       </figure>
       <figure>
         <img src="references/amie-docs-sidebar.png" alt="Settings organization reference" />
-        <figcaption>间接参考：设置/说明内容的目录式组织。VoiceStream 应更像 desktop preferences，而不是文档站。</figcaption>
+        <figcaption>间接参考：设置/说明内容的目录式组织。SpeakMore 应更像 desktop preferences，而不是文档站。</figcaption>
       </figure>
 
       <h2>落地顺序</h2>

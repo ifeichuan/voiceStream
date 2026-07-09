@@ -1,13 +1,13 @@
-# VoiceStream Architecture
+# SpeakMore Architecture
 
 > **Just Speak. Get Things Done.**
-> VoiceStream turns your voice into text, refined output, or background agent tasks on your Mac.
+> SpeakMore turns your voice into text, refined output, or background agent tasks on your Mac.
 
 ## Project Vision
 
-VoiceStream 受到 [Typeless](https://typeless.so)、OpenTypeless 和 type4me 的启发。这些项目证明了语音可以用来润色文本输入——我们进一步思考：既然语音可以润色，为什么不能用语音来执行任务？
+SpeakMore 受到 [Typeless](https://typeless.so)、OpenTypeless 和 type4me 的启发。这些项目证明了语音可以用来润色文本输入——我们进一步思考：既然语音可以润色，为什么不能用语音来执行任务？
 
-基于不重复造轮子的理念，VoiceStream 复用本机现有的 Coding CLI 作为 AI 后端。目前以 Pi 作为第一方支持，因为它提供了最完整的扩展体系（工具调用、会话持久化、扩展加载）。
+基于不重复造轮子的理念，SpeakMore 复用本机现有的 Coding CLI 作为 AI 后端。目前以 Pi 作为第一方支持，因为它提供了最完整的扩展体系（工具调用、会话持久化、扩展加载）。
 
 ## Tech Stack
 
@@ -52,7 +52,7 @@ Cmd+Shift+A → Mic capture → STT → Create AgentTask → Pi agent session (w
 **特性：**
 - 完整工具调用能力
 - 会话持久化（.jsonl）
-- voicestream-notify 扩展：任务完成后 AI 生成摘要 + macOS `say` 语音播报
+- speakmore-notify 扩展：任务完成后 AI 生成摘要 + macOS `say` 语音播报
 - 前端终端实时查看 agent 输出
 
 ## Architecture Overview
@@ -93,7 +93,7 @@ Cmd+Shift+A → Mic capture → STT → Create AgentTask → Pi agent session (w
 │          ▼           │   │              ▼                │
 │  ┌────────────────┐  │   │  ┌────────────────────────┐  │
 │  │ Clipboard +    │  │   │  │  Notify (say + HUD)    │  │
-│  │ Cmd+V paste    │  │   │  │  + voicestream-notify  │  │
+│  │ Cmd+V paste    │  │   │  │  + speakmore-notify  │  │
 │  └────────────────┘  │   │  └────────────────────────┘  │
 └──────────────────────┘   └──────────────────────────────┘
                │                        │
@@ -141,14 +141,14 @@ Cmd+Shift+A → Mic capture → STT → Create AgentTask → Pi agent session (w
 **AgentSession 模式：**
 - 完整 agent 会话，带工具调用
 - 会话持久化到 `.pi/sessions/` 目录
-- 加载 voicestream-notify 扩展
+- 加载 speakmore-notify 扩展
 - 超时：30 分钟
 
 **配置优先级：** 环境变量 > app-settings.json > ~/.pi/agent/settings.json
 
 ## Data Persistence
 
-### SQLite (`voicestream.db`)
+### SQLite (`speakmore.db`)
 
 ```sql
 templates       -- 5 个内置 prompt 模板（default/light/structured/official-lite/list-friendly）
@@ -205,5 +205,5 @@ src/
 └── routes/             # TanStack Router 路由定义
 
 pi-extensions/
-└── voicestream-notify.ts  # Pi 扩展：AI 摘要 + 语音播报
+└── speakmore-notify.ts  # Pi 扩展：AI 摘要 + 语音播报
 ```

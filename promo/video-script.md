@@ -1,4 +1,4 @@
-# VoiceStream 宣传视频脚本记录
+# SpeakMore 宣传视频脚本记录
 
 ## 记录原则
 
@@ -35,7 +35,7 @@ ORB 在整个视频中始终保持在屏幕当中，作为常驻视觉元素。
 
 ## 主旨句
 
-VoiceStream 先是语音输入法，然后才是 Agent 的入口。
+SpeakMore 先是语音输入法，然后才是 Agent 的入口。
 
 观众先相信"它能帮我输入"，再接受"它还能帮我办事"。
 
@@ -53,7 +53,7 @@ VoiceStream 先是语音输入法，然后才是 Agent 的入口。
 | 28–38s | Your way | 设置面板，模板 / Provider / 字典切换实时预览。字幕：你的模板 · 你的模型 · 你的语气 |
 | 38–52s | Agent + 回响 | Cmd+Shift+A，ORB 变琥珀色。说一句任务后跳剪用户切回工作。Agent 完成时 ORB 飞回中央变绿，通知滑入 + AI TTS 播报。字幕：有些话不只是输入 |
 | 52–58s | 主旨 + 三句口号 | 字幕逐行：先是输入法 / 然后是 Agent 入口 / 说一句。它跑。它讲。 |
-| 58–60s | Logo | VoiceStream |
+| 58–60s | Logo | SpeakMore |
 
 ## ORB 在视频里的语法
 

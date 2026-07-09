@@ -74,7 +74,7 @@ export const Cover: React.FC = () => {
               fontWeight: 600,
               letterSpacing: 4,
               textTransform: 'uppercase',
-            }}>VoiceStream · macOS</span>
+            }}>SpeakMore · macOS</span>
           </div>
 
           {/* Title */}

@@ -11,7 +11,7 @@
 
 ## Product Context
 
-VoiceStream is a macOS-focused voice input prototype built with Tauri, React, TypeScript, and Rust.
+SpeakMore is a macOS-focused voice input prototype built with Tauri, React, TypeScript, and Rust.
 
 Current product capabilities include:
 
@@ -37,7 +37,7 @@ Relevant docs:
 
 Treat the app UI as product UI, not a landing page.
 
-VoiceStream has two product surfaces:
+SpeakMore has two product surfaces:
 
 - popup input capsule: the transient dictation UI over the user's current app
 - management panel: the active desktop panel for dashboard, history, Agent tasks, and settings

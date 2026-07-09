@@ -1,4 +1,4 @@
-# VoiceStream Current UI + Desktop Surface Report
+# SpeakMore Current UI + Desktop Surface Report
 
 日期：2026-05-23  
 范围：当前 `src/App.tsx`、`src/App.css`、本地 Vite 预览、Lazyweb 间接参考
@@ -54,7 +54,7 @@ type NavKey = "overview" | "speech" | "pi" | "agent" | "activity";
 特点：
 
 - 左侧有 macOS traffic-light 圆点装饰。
-- 左侧标题是 `VoiceStream / 语音设置`。
+- 左侧标题是 `SpeakMore / 语音设置`。
 - 侧栏底部显示当前快捷键和 hotkey 状态。
 - 主区域顶部 sticky header 永远显示 `测试 STT` 和 `保存设置`。
 
@@ -162,7 +162,7 @@ Activity 当前包含：
 - 标题使用 `clamp()` 和较强 letter-spacing
 - 基本没有传统 card，但有很多文档式 section
 
-这套风格不难看，但更像“配置文档/纸面控制台”。对于 VoiceStream 管理面板，更合适的方向是“桌面工具控制台”：
+这套风格不难看，但更像“配置文档/纸面控制台”。对于 SpeakMore 管理面板，更合适的方向是“桌面工具控制台”：
 
 - 更紧凑
 - 更像 macOS utility/preferences
@@ -172,10 +172,10 @@ Activity 当前包含：
 
 ## 产品模型纠偏
 
-VoiceStream 应按两个表面组织：
+SpeakMore 应按两个表面组织：
 
 ```text
-VoiceStream
+SpeakMore
 ├─ Popup Capsule
 │  ├─ waveform
 │  ├─ live transcript
@@ -209,7 +209,7 @@ VoiceStream
 - recent activity
 - readiness checklist
 
-不能直接当作 VoiceStream 的桌面形态。尤其是弹出输入胶囊，应以本地文档 `docs/features/hud-capsule.md` 为准。Lazyweb 对这个胶囊形态的直接证据不足，具体桌面胶囊参考 `uncertain`。
+不能直接当作 SpeakMore 的桌面形态。尤其是弹出输入胶囊，应以本地文档 `docs/features/hud-capsule.md` 为准。Lazyweb 对这个胶囊形态的直接证据不足，具体桌面胶囊参考 `uncertain`。
 
 ## Dashboard 应该长什么样
 

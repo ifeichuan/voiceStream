@@ -29,7 +29,7 @@ export const ClosingScene: React.FC = () => {
         letterSpacing: -1,
         opacity: scale,
       }}>
-        VoiceStream
+        SpeakMore
       </h1>
 
       {/* Tagline */}

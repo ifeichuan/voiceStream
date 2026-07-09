@@ -27,7 +27,7 @@ use tauri_plugin_global_shortcut::{
 pub(crate) const DICTATION_SHORTCUT: &str = "Cmd+Shift+Space";
 const HOTKEY_PASTE_WAIT_MS: u64 = 2500;
 const HOTKEY_TAP_THRESHOLD_MS: u128 = 220;
-const DISABLE_GLOBAL_SHORTCUTS_ENV: &str = "VOICESTREAM_DISABLE_GLOBAL_SHORTCUTS";
+const DISABLE_GLOBAL_SHORTCUTS_ENV: &str = "SPEAKMORE_DISABLE_GLOBAL_SHORTCUTS";
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AudioChunk {
@@ -739,12 +739,12 @@ fn log_timing(
 ) {
     if details.is_empty() {
         eprintln!(
-            "[voicestream][timing][session:{}] {}: {} ms",
+            "[speakmore][timing][session:{}] {}: {} ms",
             session_id, stage, elapsed_ms
         );
     } else {
         eprintln!(
-            "[voicestream][timing][session:{}] {}: {} ms ({})",
+            "[speakmore][timing][session:{}] {}: {} ms ({})",
             session_id, stage, elapsed_ms, details
         );
     }
@@ -799,7 +799,7 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
-    let file_path = format!("/tmp/voicestream_{}.wav", timestamp);
+    let file_path = format!("/tmp/speakmore_{}.wav", timestamp);
 
     std::fs::write(&file_path, create_wav_header(sample_rate, channels, 16, 0))
         .map_err(|e| format!("Write header error: {}", e))?;
@@ -929,7 +929,7 @@ fn play_recorded() -> Result<String, String> {
                     entry
                         .file_name()
                         .to_string_lossy()
-                        .starts_with("voicestream_")
+                        .starts_with("speakmore_")
                 })
                 .max_by_key(|entry| {
                     entry
@@ -1114,7 +1114,7 @@ fn trigger_cmd_v() -> Result<(), String> {
         AXIsProcessTrusted()
     };
     if !trusted {
-        return Err("App is not trusted for Accessibility. Add VoiceStream in System Settings > Privacy & Security > Accessibility.".to_string());
+        return Err("App is not trusted for Accessibility. Add SpeakMore in System Settings > Privacy & Security > Accessibility.".to_string());
     }
 
     let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
@@ -1493,18 +1493,18 @@ fn env_flag_enabled(name: &str) -> bool {
 }
 
 fn maybe_run_pi_startup_self_test() {
-    if !env_flag_enabled("VOICESTREAM_PI_STARTUP_TEST") {
+    if !env_flag_enabled("SPEAKMORE_PI_STARTUP_TEST") {
         return;
     }
 
     thread::spawn(|| {
-        eprintln!("[voicestream][startup-test] starting pi self-test");
+        eprintln!("[speakmore][startup-test] starting pi self-test");
         let started_at = Instant::now();
         let sample = "好的好的，我们现在测试一下普通语音整理链路。";
         match pi_rpc::refine_text(sample) {
             Ok(result) => {
                 eprintln!(
-                    "[voicestream][startup-test] success in {} ms result={}",
+                    "[speakmore][startup-test] success in {} ms result={}",
                     started_at.elapsed().as_millis(),
                     serde_json::to_string(&result)
                         .unwrap_or_else(|_| "\"<encode-failed>\"".to_string())
@@ -1512,7 +1512,7 @@ fn maybe_run_pi_startup_self_test() {
             }
             Err(error) => {
                 eprintln!(
-                    "[voicestream][startup-test] failed in {} ms error={}",
+                    "[speakmore][startup-test] failed in {} ms error={}",
                     started_at.elapsed().as_millis(),
                     error
                 );
@@ -1880,7 +1880,7 @@ pub fn run() {
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 settings::set_app_data_dir(app_data_dir.clone());
                 if let Err(e) = db::initialize(&app_data_dir) {
-                    eprintln!("[voicestream] db initialization failed: {}", e);
+                    eprintln!("[speakmore] db initialization failed: {}", e);
                 }
             }
 
@@ -1899,7 +1899,7 @@ pub fn run() {
             {
                 if env_flag_enabled(DISABLE_GLOBAL_SHORTCUTS_ENV) {
                     eprintln!(
-                        "[voicestream] global shortcuts disabled by {}",
+                        "[speakmore] global shortcuts disabled by {}",
                         DISABLE_GLOBAL_SHORTCUTS_ENV
                     );
                 } else {
@@ -1920,7 +1920,7 @@ pub fn run() {
                     if let Err(error) =
                         register_agent_shortcut(&app.handle(), &shortcuts.agent_shortcut)
                     {
-                        eprintln!("[voicestream] failed to register agent shortcut: {}", error);
+                        eprintln!("[speakmore] failed to register agent shortcut: {}", error);
                     }
                 }
             }

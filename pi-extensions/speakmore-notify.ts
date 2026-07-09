@@ -69,7 +69,7 @@ function defaultInboxPath(cwd: string | undefined): string {
 }
 
 function notifyInboxPath(ctx: unknown): string {
-  const configured = process.env.VOICESTREAM_NOTIFY_INBOX?.trim();
+  const configured = process.env.SPEAKMORE_NOTIFY_INBOX?.trim();
   if (configured) return configured;
 
   const cwd = asRecord(ctx)?.cwd;
@@ -83,7 +83,7 @@ function appendInbox(ctx: unknown, payload: JsonRecord): void {
 }
 
 function shouldAutoSay(): boolean {
-  return process.env.VOICESTREAM_NOTIFY_AUTO_SAY !== "0";
+  return process.env.SPEAKMORE_NOTIFY_AUTO_SAY !== "0";
 }
 
 function killExistingSay(): Promise<void> {
@@ -111,7 +111,7 @@ function buildNotification(event: unknown, ctx: unknown): JsonRecord {
 
   return {
     version: 1,
-    source: "voicestream-notify",
+    source: "speakmore-notify",
     status: "completed",
     title,
     summary,
@@ -206,7 +206,7 @@ async function generateAISummary(
   return null;
 }
 
-export default function voicestreamNotifyExtension(pi: ExtensionAPI) {
+export default function speakmoreNotifyExtension(pi: ExtensionAPI) {
   // ── register tool: summarize_session ──
   // Lets the LLM explicitly request a summary + speech at the end of a task.
   pi.registerTool({

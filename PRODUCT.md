@@ -8,7 +8,7 @@ Developers on macOS who want voice input without leaving their workflow. They pr
 
 **Light, Fluid, Invisible** (轻盈、流畅、隐形)
 
-VoiceStream should feel like air — present when needed, gone when not. It is not a dashboard, not a control panel, not an AI product. It is a utility that earns trust by staying out of the way. The UI should evoke the calm of iA Writer or Things: generous whitespace, minimal elements, information that appears on demand rather than all at once.
+SpeakMore should feel like air — present when needed, gone when not. It is not a dashboard, not a control panel, not an AI product. It is a utility that earns trust by staying out of the way. The UI should evoke the calm of iA Writer or Things: generous whitespace, minimal elements, information that appears on demand rather than all at once.
 
 ### Aesthetic Direction
 

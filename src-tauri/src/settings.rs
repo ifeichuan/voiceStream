@@ -289,19 +289,19 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
     let stored = read_runtime_settings_file().unwrap_or_else(|_| default_app_settings());
     let (local_default_provider, local_default_model) = read_local_pi_defaults();
 
-    let env_provider = env::var("VOICESTREAM_PI_PROVIDER")
+    let env_provider = env::var("SPEAKMORE_PI_PROVIDER")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    let env_model = env::var("VOICESTREAM_PI_MODEL")
+    let env_model = env::var("SPEAKMORE_PI_MODEL")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    let env_mode = env::var("VOICESTREAM_PI_MODE")
+    let env_mode = env::var("SPEAKMORE_PI_MODE")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    let env_reuse = env::var("VOICESTREAM_PI_REUSE_PROCESS").ok().map(|value| {
+    let env_reuse = env::var("SPEAKMORE_PI_REUSE_PROCESS").ok().map(|value| {
         !matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "0" | "false" | "no"
@@ -320,7 +320,7 @@ pub fn runtime_pi_settings() -> RuntimePiSettings {
         .or_else(|| sanitize(&stored.pi.mode))
         .unwrap_or_else(|| DEFAULT_PI_MODE.to_string());
     let reuse_process = env_reuse.unwrap_or(stored.pi.reuse_process);
-    let env_thinking = env::var("VOICESTREAM_PI_THINKING")
+    let env_thinking = env::var("SPEAKMORE_PI_THINKING")
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
@@ -822,7 +822,7 @@ fn read_local_pi_defaults() -> (String, String) {
 }
 
 fn resolve_pi_path_for_settings() -> PathBuf {
-    if let Ok(path) = env::var("VOICESTREAM_PI_PATH") {
+    if let Ok(path) = env::var("SPEAKMORE_PI_PATH") {
         let path = PathBuf::from(path);
         if path.exists() {
             return path;

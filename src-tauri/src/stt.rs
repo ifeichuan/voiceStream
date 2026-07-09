@@ -812,7 +812,7 @@ fn build_ws_request(settings: &StoredSttSettings) -> Result<http::Request<()>, S
     );
     request.headers_mut().insert(
         "user-agent",
-        "VoiceStream/0.1.0"
+        "SpeakMore/0.1.0"
             .parse()
             .map_err(|e| format!("invalid user-agent header: {}", e))?,
     );

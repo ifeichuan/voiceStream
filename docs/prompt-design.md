@@ -1,4 +1,4 @@
-# VoiceStream Prompt 设计说明
+# SpeakMore Prompt 设计说明
 
 ## 当前 Prompt 位置
 

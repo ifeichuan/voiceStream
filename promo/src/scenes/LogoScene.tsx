@@ -23,7 +23,7 @@ export const LogoScene: React.FC = () => {
               letterSpacing: -2,
             }}
           >
-            VoiceStream
+            SpeakMore
           </h1>
         </SpringPopIn>
         <Sequence from={12} durationInFrames={48} layout="none">

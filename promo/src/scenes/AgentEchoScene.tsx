@@ -86,7 +86,7 @@ export const AgentEchoScene: React.FC = () => {
           <Sequence from={175} durationInFrames={245} layout="none">
             <TerminalSimulator
               lines={AGENT_LINES}
-              title="VoiceStream Agent"
+              title="SpeakMore Agent"
               width={640}
               height={300}
               fontSize={13}

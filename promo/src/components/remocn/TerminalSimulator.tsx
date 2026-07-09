@@ -67,7 +67,7 @@ function TerminalLineRow({line, prompt, fontSize, lineHeight, charsPerFrame, chu
 export function TerminalSimulator({
   lines = [],
   prompt = '$',
-  title = '~/projects/voicestream',
+  title = '~/projects/speakmore',
   background = '#0a0a0a',
   chromeColor = '#1a1a1a',
   fontSize = 15,

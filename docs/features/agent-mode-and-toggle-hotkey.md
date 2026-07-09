@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 VoiceStream 已具备以下能力:
+当前 SpeakMore 已具备以下能力:
 
 - 全局快捷键触发录音
 - 实时音频采集
@@ -93,8 +93,8 @@
 
 并支持通过环境变量切换:
 
-- `VOICESTREAM_PI_MODE=dictation-fast`
-- `VOICESTREAM_PI_MODE=agent`
+- `SPEAKMORE_PI_MODE=dictation-fast`
+- `SPEAKMORE_PI_MODE=agent`
 
 ### STT 链路判断
 
@@ -180,7 +180,7 @@
 
 - 应用启动时执行 `warmup()`
 - 默认 `DictationFast` 路径复用同一个 RPC 子进程
-- 通过 `VOICESTREAM_PI_REUSE_PROCESS` 可切换成 fresh process,对比基准表现
+- 通过 `SPEAKMORE_PI_REUSE_PROCESS` 可切换成 fresh process,对比基准表现
 
 当前观察:
 
@@ -267,15 +267,15 @@
 
 仓库中已新增脚本:
 
-- `scripts/voicestream-dev.sh`
+- `scripts/speakmore-dev.sh`
 
 当前常用命令包括:
 
-- `scripts/voicestream-dev.sh dev-fast`
-- `scripts/voicestream-dev.sh dev-voice`
-- `scripts/voicestream-dev.sh dev-agent`
-- `scripts/voicestream-dev.sh bench 10`
-- `scripts/voicestream-dev.sh bench-fresh 10`
+- `scripts/speakmore-dev.sh dev-fast`
+- `scripts/speakmore-dev.sh dev-voice`
+- `scripts/speakmore-dev.sh dev-agent`
+- `scripts/speakmore-dev.sh bench 10`
+- `scripts/speakmore-dev.sh bench-fresh 10`
 
 这些命令用于快速验证:
 
