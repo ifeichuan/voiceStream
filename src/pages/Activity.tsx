@@ -24,7 +24,11 @@ export default function Activity() {
             >
               <div className="flex items-baseline justify-between gap-4 max-[760px]:flex-col max-[760px]:items-start">
                 <strong className="text-[0.88rem] font-semibold">
-                  {notification.status === "failed" ? "失败" : "完成"} · {notification.title}
+                  {notification.status === "failed"
+                    ? "失败"
+                    : notification.status === "needs_attention"
+                      ? "需要回应"
+                      : "完成"} · {notification.title}
                 </strong>
                 <span className="shrink-0 text-[0.75rem] tabular-nums text-paper-muted">
                   {new Date(notification.timestamp_ms).toLocaleTimeString()}

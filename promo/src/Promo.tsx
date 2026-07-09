@@ -1,94 +1,91 @@
-import {AbsoluteFill, Sequence, Audio, staticFile} from 'remotion';
-import {OpeningScene} from './scenes/OpeningScene';
-import {DictationScene} from './scenes/DictationScene';
-import {DictationScene2} from './scenes/DictationScene2';
-import {DictationScene3} from './scenes/DictationScene3';
-import {AgentScene} from './scenes/AgentScene';
-import {ClosingScene} from './scenes/ClosingScene';
+import {AbsoluteFill, Sequence, Audio, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {PersistentOrb} from './components/PersistentOrb';
+import {getOrbState, CAMERA_FOLLOW} from './orbState';
+import {SlowPolishScene} from './scenes/SlowPolishScene';
+import {FastFlashScene} from './scenes/FastFlashScene';
+import {YourWayScene} from './scenes/YourWayScene';
+import {AgentEchoScene} from './scenes/AgentEchoScene';
+import {ThesisScene} from './scenes/ThesisScene';
+import {LogoScene} from './scenes/LogoScene';
+
+// Timeline (60s @ 30fps = 1800 frames)
+//   0-120  (4s)   Opening — PersistentOrb scales up at center
+//   120-540  (14s)  SlowPolishScene
+//   540-840  (10s)  FastFlashScene
+//   840-1140 (10s)  YourWayScene
+//   1140-1560 (14s) AgentEchoScene (climax: amber → green TTS reply)
+//   1560-1740 (6s)  ThesisScene
+//   1740-1800 (2s)  LogoScene
 
 export const Promo: React.FC = () => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  const {pxX, pxY} = getOrbState(frame, fps);
+
+  // Camera follows ORB inversely — when ORB flies right, scene drifts left.
+  const camX = -pxX * CAMERA_FOLLOW;
+  const camY = -pxY * CAMERA_FOLLOW;
+
   return (
-    <AbsoluteFill style={{backgroundColor: '#0a0a0a'}}>
-      {/* Scenes */}
-      <Sequence from={0} durationInFrames={120}>
-        <OpeningScene />
+    <AbsoluteFill style={{backgroundColor: '#050505'}}>
+      {/* Camera-tracked layer: scenes + ORB share a single transform */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          transform: `translate(${camX}px, ${camY}px)`,
+          willChange: 'transform',
+        }}
+      >
+        <Sequence from={120} durationInFrames={420}>
+          <SlowPolishScene />
+        </Sequence>
+        <Sequence from={540} durationInFrames={300}>
+          <FastFlashScene />
+        </Sequence>
+        <Sequence from={840} durationInFrames={300}>
+          <YourWayScene />
+        </Sequence>
+        <Sequence from={1140} durationInFrames={420}>
+          <AgentEchoScene />
+        </Sequence>
+        <Sequence from={1560} durationInFrames={180}>
+          <ThesisScene />
+        </Sequence>
+        <Sequence from={1740} durationInFrames={60}>
+          <LogoScene />
+        </Sequence>
+
+        <PersistentOrb />
+      </div>
+
+      {/* Audio stays outside the camera transform */}
+      <Sequence from={20} durationInFrames={20}>
+        <Audio src={staticFile('activate.wav')} volume={0.4} />
       </Sequence>
-      <Sequence from={120} durationInFrames={130}>
-        <DictationScene />
+      <Sequence from={140} durationInFrames={10}>
+        <Audio src={staticFile('keystroke.wav')} volume={0.7} />
       </Sequence>
-      <Sequence from={250} durationInFrames={130}>
-        <DictationScene2 />
-      </Sequence>
-      <Sequence from={380} durationInFrames={130}>
-        <DictationScene3 />
-      </Sequence>
-      <Sequence from={510} durationInFrames={190}>
-        <AgentScene />
-      </Sequence>
-      <Sequence from={700} durationInFrames={90}>
-        <ClosingScene />
+      <Sequence from={142} durationInFrames={20}>
+        <Audio src={staticFile('record-start.wav')} volume={0.4} />
       </Sequence>
 
-      {/* Sound effects */}
-      {/* Opening - activate */}
-      <Sequence from={5} durationInFrames={15}>
-        <Audio src={staticFile('activate.wav')} volume={0.6} />
+      <Sequence from={1155} durationInFrames={10}>
+        <Audio src={staticFile('keystroke.wav')} volume={0.7} />
       </Sequence>
-
-      {/* Dictation 1 - keystroke + record start */}
-      <Sequence from={128} durationInFrames={10}>
-        <Audio src={staticFile('keystroke.wav')} volume={0.8} />
-      </Sequence>
-      <Sequence from={130} durationInFrames={15}>
-        <Audio src={staticFile('record-start.wav')} volume={0.5} />
-      </Sequence>
-
-      {/* Dictation 2 - keystroke + record start */}
-      <Sequence from={258} durationInFrames={10}>
-        <Audio src={staticFile('keystroke.wav')} volume={0.8} />
-      </Sequence>
-      <Sequence from={260} durationInFrames={15}>
-        <Audio src={staticFile('record-start.wav')} volume={0.5} />
-      </Sequence>
-
-      {/* Dictation 3 - keystroke + record start */}
-      <Sequence from={388} durationInFrames={10}>
-        <Audio src={staticFile('keystroke.wav')} volume={0.8} />
-      </Sequence>
-      <Sequence from={390} durationInFrames={15}>
-        <Audio src={staticFile('record-start.wav')} volume={0.5} />
-      </Sequence>
-
-      {/* Agent - keystroke + activate */}
-      <Sequence from={518} durationInFrames={10}>
-        <Audio src={staticFile('keystroke.wav')} volume={0.8} />
-      </Sequence>
-      <Sequence from={520} durationInFrames={15}>
+      <Sequence from={1157} durationInFrames={20}>
         <Audio src={staticFile('activate.wav')} volume={0.5} />
       </Sequence>
 
-      {/* Agent - question sound */}
-      <Sequence from={620} durationInFrames={20}>
-        <Audio src={staticFile('question.wav')} volume={0.6} />
+      <Sequence from={1420} durationInFrames={30}>
+        <Audio src={staticFile('complete.wav')} volume={0.5} />
       </Sequence>
 
-      {/* Agent - second keystroke for voice reply */}
-      <Sequence from={640} durationInFrames={10}>
-        <Audio src={staticFile('keystroke.wav')} volume={0.7} />
-      </Sequence>
-      <Sequence from={642} durationInFrames={15}>
-        <Audio src={staticFile('record-start.wav')} volume={0.5} />
+      <Sequence from={1740} durationInFrames={20}>
+        <Audio src={staticFile('activate.wav')} volume={0.3} />
       </Sequence>
 
-      {/* Agent - complete */}
-      <Sequence from={675} durationInFrames={30}>
-        <Audio src={staticFile('complete.wav')} volume={0.6} />
-      </Sequence>
-
-      {/* Closing - activate */}
-      <Sequence from={700} durationInFrames={15}>
-        <Audio src={staticFile('activate.wav')} volume={0.4} />
-      </Sequence>
+      {/* TODO: Add real TTS audio file at frame ~1430 for AI reply */}
     </AbsoluteFill>
   );
 };

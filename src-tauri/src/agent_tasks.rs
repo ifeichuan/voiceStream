@@ -17,6 +17,8 @@ pub enum AgentTaskStatus {
     Pending,
     Running,
     Completed,
+    #[serde(rename = "needs_attention")]
+    NeedsAttention,
     Failed,
     Interrupted,
     Unknown,
@@ -96,13 +98,24 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
             task.status,
             AgentTaskStatus::Pending | AgentTaskStatus::Running
         ) {
-            task.status = AgentTaskStatus::Interrupted;
-            task.updated_at_ms = now_ms();
-            task.events.push(AgentTaskEvent {
-                timestamp_ms: now_ms(),
-                kind: "interrupted".to_string(),
-                message: "应用重启后将未完成任务标记为已中断。".to_string(),
-            });
+            let timestamp_ms = now_ms();
+            if let Some(prompt) = detect_pending_question_from_path(&PathBuf::from(&task.session_path)) {
+                task.status = AgentTaskStatus::NeedsAttention;
+                task.error_text.clear();
+                task.events.push(AgentTaskEvent {
+                    timestamp_ms,
+                    kind: "needs_attention".to_string(),
+                    message: prompt,
+                });
+            } else {
+                task.status = AgentTaskStatus::Interrupted;
+                task.events.push(AgentTaskEvent {
+                    timestamp_ms,
+                    kind: "interrupted".to_string(),
+                    message: "应用重启后将未完成任务标记为已中断。".to_string(),
+                });
+            }
+            task.updated_at_ms = timestamp_ms;
             changed = true;
         }
     }
@@ -234,6 +247,22 @@ pub fn mark_completed(
     })
 }
 
+pub fn mark_needs_attention(
+    app: &AppHandle,
+    task_id: &str,
+    prompt: &str,
+) -> Result<AgentTask, String> {
+    update_task(app, task_id, |task| {
+        task.status = AgentTaskStatus::NeedsAttention;
+        task.error_text.clear();
+        task.events.push(AgentTaskEvent {
+            timestamp_ms: now_ms(),
+            kind: "needs_attention".to_string(),
+            message: prompt.trim().to_string(),
+        });
+    })
+}
+
 pub fn mark_failed(app: &AppHandle, task_id: &str, error: &str) -> Result<AgentTask, String> {
     update_task(app, task_id, |task| {
         task.status = AgentTaskStatus::Failed;
@@ -244,6 +273,15 @@ pub fn mark_failed(app: &AppHandle, task_id: &str, error: &str) -> Result<AgentT
             message: error.trim().to_string(),
         });
     })
+}
+
+pub fn detect_pending_question(task: &AgentTask) -> Option<String> {
+    detect_pending_question_from_path(&PathBuf::from(&task.session_path))
+}
+
+fn detect_pending_question_from_path(session_path: &PathBuf) -> Option<String> {
+    let content = fs::read_to_string(session_path).ok()?;
+    detect_pending_question_in_jsonl(&content)
 }
 
 pub fn get_task(task_id: &str) -> Result<AgentTask, String> {
@@ -540,6 +578,88 @@ fn render_content_items(items: &[Value], tool_name: &mut String) -> String {
         .join("\n\n")
 }
 
+fn detect_pending_question_in_jsonl(content: &str) -> Option<String> {
+    let mut pending: Option<String> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        let Some(message) = value.get("message") else {
+            continue;
+        };
+        let role = message.get("role").and_then(Value::as_str).unwrap_or("");
+        if role == "user" || role == "toolResult" {
+            pending = None;
+            continue;
+        }
+
+        let Some(items) = message.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            if item.get("type").and_then(Value::as_str) != Some("toolCall") {
+                continue;
+            }
+            let tool_name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if is_question_tool_name(&tool_name) {
+                let args = item
+                    .get("arguments")
+                    .or_else(|| item.get("args"))
+                    .or_else(|| item.get("input"))
+                    .unwrap_or(&Value::Null);
+                pending = Some(extract_question_prompt(args).unwrap_or_else(|| {
+                    "Agent 需要用户回应才能继续。".to_string()
+                }));
+            }
+        }
+    }
+
+    pending
+}
+
+fn is_question_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "ask_user_question" | "ask_user" | "question" | "ask" | "confirm" | "approval" | "permission"
+    )
+}
+
+fn extract_question_prompt(value: &Value) -> Option<String> {
+    for key in ["question", "prompt", "message", "text", "title"] {
+        if let Some(text) = value.get(key).and_then(Value::as_str) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+
+    if let Some(questions) = value.get("questions").and_then(Value::as_array) {
+        let text = questions
+            .iter()
+            .filter_map(|question| question.get("question").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+
+    None
+}
+
 fn pretty_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| "uncertain".to_string())
 }
@@ -577,7 +697,7 @@ fn now_ms() -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use super::derive_title;
+    use super::{derive_title, detect_pending_question_in_jsonl};
 
     #[test]
     fn derives_short_title_from_transcript() {
@@ -593,5 +713,34 @@ mod tests {
             derive_title("请帮我检查这个项目里面所有和语音输入 Agent 模式相关的问题并给出结果");
         assert!(title.ends_with('…'));
         assert!(title.chars().count() <= 29);
+    }
+
+    #[test]
+    fn detects_pending_question_tool_call() {
+        let jsonl = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","name":"ask_user_question","arguments":{"questions":[{"question":"选哪个方案？"}]}}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"等待回应"}]}}"#;
+
+        assert_eq!(
+            detect_pending_question_in_jsonl(jsonl),
+            Some("选哪个方案？".to_string())
+        );
+    }
+
+    #[test]
+    fn detects_pi_ask_user_tool_call() {
+        let jsonl = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","name":"ask_user","arguments":{"question":"Which option should we use?"}}]}}"#;
+
+        assert_eq!(
+            detect_pending_question_in_jsonl(jsonl),
+            Some("Which option should we use?".to_string())
+        );
+    }
+
+    #[test]
+    fn clears_pending_question_after_user_reply() {
+        let jsonl = r#"{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","name":"question","arguments":{"question":"继续吗？"}}]}}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"继续"}]}}"#;
+
+        assert_eq!(detect_pending_question_in_jsonl(jsonl), None);
     }
 }

@@ -1,5 +1,31 @@
 use crate::settings;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+const NEEDS_ATTENTION_ERROR_PREFIX: &str = "voicestream_needs_attention:";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct AskPromptPayload {
+    pub questions: Vec<AskPromptQuestion>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct AskPromptQuestion {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<AskPromptOption>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct AskPromptOption {
+    pub label: String,
+    pub description: String,
+}
+
+pub(crate) fn parse_needs_attention_error(error: &str) -> Option<AskPromptPayload> {
+    let encoded = error.strip_prefix(NEEDS_ATTENTION_ERROR_PREFIX)?.trim();
+    serde_json::from_str(encoded).ok()
+}
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -1180,6 +1206,15 @@ fn wait_for_agent_task_completion(
                             .and_then(Value::as_str)
                             .unwrap_or("unknown");
                         trace.mark("agent_tool_execution_start", &format!("tool={}", tool_name));
+
+                        if let Some(prompt) = extract_question_tool_prompt_from_event(&line.value) {
+                            let summary = prompt.questions.first().map(|q| q.question.as_str()).unwrap_or("Agent 需要用户回应才能继续。");
+                            on_event("needs-attention", summary);
+                            shutdown_child(child);
+                            let encoded = serde_json::to_string(&prompt).unwrap_or_else(|_| "{}".to_string());
+                            return Err(format!("{} {}", NEEDS_ATTENTION_ERROR_PREFIX, encoded));
+                        }
+
                         on_event("tool-start", &format!("正在执行工具：{}", tool_name));
                     }
                     Some("tool_execution_update") => {
@@ -1395,6 +1430,113 @@ fn format_stderr(stderr: &Arc<Mutex<String>>) -> String {
     }
 }
 
+fn extract_question_tool_prompt_from_event(event: &Value) -> Option<AskPromptPayload> {
+    let tool_name = event
+        .get("toolName")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !is_question_tool_name(&tool_name) {
+        return None;
+    }
+
+    let args = event
+        .get("args")
+        .or_else(|| event.get("arguments"))
+        .or_else(|| event.get("input"))
+        .unwrap_or(&Value::Null);
+    let questions = extract_questions(args);
+    Some(AskPromptPayload {
+        questions: if questions.is_empty() {
+            vec![AskPromptQuestion {
+                question: "Agent 需要用户回应才能继续。".to_string(),
+                header: "问题".to_string(),
+                options: Vec::new(),
+            }]
+        } else {
+            questions
+        },
+    })
+}
+
+fn is_question_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "ask_user_question" | "ask_user" | "question" | "ask" | "confirm" | "approval" | "permission"
+    )
+}
+
+fn extract_questions(value: &Value) -> Vec<AskPromptQuestion> {
+    if let Some(questions) = value.get("questions").and_then(Value::as_array) {
+        return questions.iter().filter_map(extract_question).collect();
+    }
+
+    extract_question(value).into_iter().collect()
+}
+
+fn extract_question(value: &Value) -> Option<AskPromptQuestion> {
+    let question = extract_question_prompt(value)?;
+    let header = value
+        .get("header")
+        .and_then(Value::as_str)
+        .unwrap_or("问题")
+        .trim()
+        .to_string();
+    let options = value
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(extract_question_option).collect())
+        .unwrap_or_default();
+    Some(AskPromptQuestion {
+        question,
+        header: if header.is_empty() { "问题".to_string() } else { header },
+        options,
+    })
+}
+
+fn extract_question_option(value: &Value) -> Option<AskPromptOption> {
+    if let Some(label) = value.as_str() {
+        let label = label.trim();
+        if label.is_empty() {
+            return None;
+        }
+        return Some(AskPromptOption {
+            label: label.to_string(),
+            description: String::new(),
+        });
+    }
+
+    let label = value
+        .get("label")
+        .or_else(|| value.get("title"))
+        .and_then(Value::as_str)?
+        .trim()
+        .to_string();
+    if label.is_empty() {
+        return None;
+    }
+    let description = value
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Some(AskPromptOption { label, description })
+}
+
+fn extract_question_prompt(value: &Value) -> Option<String> {
+    for key in ["question", "prompt", "message", "text", "title"] {
+        if let Some(text) = value.get(key).and_then(Value::as_str) {
+            let text = text.trim();
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 fn extract_last_assistant_text_from_agent_end(event: &Value) -> Option<String> {
     let messages = event.get("messages")?.as_array()?;
 
@@ -1453,8 +1595,49 @@ fn extract_assistant_error(message: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{refine_text, warmup};
+    use super::{extract_question_tool_prompt_from_event, parse_needs_attention_error, refine_text, warmup};
+    use serde_json::json;
     use std::time::Instant;
+
+    #[test]
+    fn detects_rpiv_ask_user_question_tool_start() {
+        let event = json!({
+            "type": "tool_execution_start",
+            "toolName": "ask_user_question",
+            "args": {
+                "questions": [{
+                    "question": "这次测试要走哪条路径？",
+                    "header": "测试路径",
+                    "options": [{"label": "最小验证", "description": "只检查通知"}]
+                }]
+            }
+        });
+
+        let prompt = extract_question_tool_prompt_from_event(&event).expect("prompt");
+        assert_eq!(prompt.questions[0].question, "这次测试要走哪条路径？");
+        assert_eq!(prompt.questions[0].header, "测试路径");
+        assert_eq!(prompt.questions[0].options[0].label, "最小验证");
+        assert_eq!(prompt.questions[0].options[0].description, "只检查通知");
+    }
+
+    #[test]
+    fn detects_pi_ask_user_tool_start() {
+        let event = json!({
+            "type": "tool_execution_start",
+            "toolName": "ask_user",
+            "args": { "question": "Which option should we use?" }
+        });
+
+        let prompt = extract_question_tool_prompt_from_event(&event).expect("prompt");
+        assert_eq!(prompt.questions[0].question, "Which option should we use?");
+    }
+
+    #[test]
+    fn parses_needs_attention_error() {
+        let error = r#"voicestream_needs_attention: {"questions":[{"question":"继续吗？","header":"确认","options":[]}]}"#;
+        let prompt = parse_needs_attention_error(error).expect("prompt");
+        assert_eq!(prompt.questions[0].question, "继续吗？");
+    }
 
     #[test]
     #[ignore = "real rpc benchmark; run manually with cargo test pi_rpc_repeated_refine_same_text -- --ignored --nocapture"]

@@ -119,7 +119,7 @@ export interface AgentTask {
   id: string;
   title: string;
   transcript: string;
-  status: "pending" | "running" | "completed" | "failed" | "interrupted" | "unknown";
+  status: "pending" | "running" | "completed" | "needs_attention" | "failed" | "interrupted" | "unknown";
   created_at_ms: number;
   updated_at_ms: number;
   session_path: string;
@@ -135,12 +135,30 @@ export interface AgentTaskUpdatedEvent {
 export interface AgentNotificationEvent {
   task_id: string;
   title: string;
-  status: "completed" | "failed" | string;
+  status: "completed" | "needs_attention" | "failed" | string;
   summary: string;
   display_text: string;
   spoken_text: string;
   channel: string;
   timestamp_ms: number;
+}
+
+export interface AgentAskPromptEvent {
+  task_id: string;
+  title: string;
+  questions: AgentAskPromptQuestion[];
+  timestamp_ms: number;
+}
+
+export interface AgentAskPromptQuestion {
+  question: string;
+  header: string;
+  options: AgentAskPromptOption[];
+}
+
+export interface AgentAskPromptOption {
+  label: string;
+  description: string;
 }
 
 export interface AgentTerminalOutputEvent {

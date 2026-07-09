@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { createRootRoute, Outlet, useLocation, Link } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "../hooks/useTauriEvents";
+import { useUiClickSound } from "../hooks/useUiClickSound";
 import { useRecordingStore } from "../stores/recording";
 import { IconHome, IconAgent, IconActivity, IconSettings } from "../components/Icons";
+import { AgentNotice } from "../components/AgentNotice";
 import { SettingsDialog } from "../components/SettingsDialog";
 import Agent from "../pages/Agent";
 
@@ -23,6 +25,7 @@ const NAV_ITEMS = [
 
 function RootLayout() {
   useTauriEvents();
+  useUiClickSound();
 
   const location = useLocation();
   const hotkeyStatus = useRecordingStore((state) => state.hotkeyStatus);
@@ -31,6 +34,7 @@ function RootLayout() {
   const [accessibility, setAccessibility] = useState(true);
 
   const isAgent = location.pathname === "/agent";
+  const isAskOverlay = location.pathname === "/ask-overlay";
 
   useEffect(() => {
     invoke<{ accessibility: boolean }>("check_permissions").then((status) => {
@@ -43,6 +47,10 @@ function RootLayout() {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  if (isAskOverlay) {
+    return <Outlet />;
+  }
 
   return (
     <main className="flex h-screen min-w-0 bg-paper-surface">
@@ -123,6 +131,7 @@ function RootLayout() {
         </section>
       </div>
 
+      <AgentNotice />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </main>
   );

@@ -26,6 +26,7 @@ export const PROMPT_TEMPLATES = [
   { value: "structured", label: "结构化 · 轻结构化" },
   { value: "official-lite", label: "官方感 · 简洁清晰" },
   { value: "list-friendly", label: "列表友好 · 1. 2. 3." },
+  { value: "typeless", label: "Typeless · 英文风格" },
 ] as const;
 
 export const NAV_ITEMS = [

@@ -53,6 +53,8 @@ export function statusLabel(status: AgentTask["status"]): string {
       return "执行中";
     case "completed":
       return "已完成";
+    case "needs_attention":
+      return "需要回应";
     case "failed":
       return "失败";
     case "interrupted":

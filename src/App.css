@@ -52,6 +52,18 @@
   }
 }
 
+@keyframes agent-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --color-paper-bg: #201d1d;
