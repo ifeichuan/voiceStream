@@ -11,7 +11,7 @@ mod stt_providers;
 
 use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{Seek, SeekFrom, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
 use stt::SttProvider;
-use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutEvent, ShortcutState,
 };
@@ -71,6 +71,27 @@ pub struct AgentNotificationEvent {
     pub timestamp_ms: u128,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentAskPromptEvent {
+    pub task_id: String,
+    pub title: String,
+    pub questions: Vec<AgentAskPromptQuestion>,
+    pub timestamp_ms: u128,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentAskPromptQuestion {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<AgentAskPromptOption>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentAskPromptOption {
+    pub label: String,
+    pub description: String,
+}
+
 #[derive(Clone)]
 struct ActiveRecording {
     file_path: String,
@@ -88,6 +109,7 @@ static STREAM_RUNNING: AtomicBool = AtomicBool::new(false);
 static mut RECORDING_STREAM: Option<cpal::Stream> = None;
 static mut PLAYBACK_STREAM: Option<cpal::Stream> = None;
 static STREAM_SLOT_LOCK: Mutex<()> = Mutex::new(());
+static PENDING_ASK_PROMPT: Mutex<Option<AgentAskPromptEvent>> = Mutex::new(None);
 static ACTIVE_RECORDING: Mutex<Option<ActiveRecording>> = Mutex::new(None);
 static ACTIVE_STT_PROVIDER: Mutex<Option<Box<dyn SttProvider>>> = Mutex::new(None);
 static HOTKEY_RECORDING: AtomicBool = AtomicBool::new(false);
@@ -184,6 +206,71 @@ fn get_agent_tasks() -> Result<Vec<agent_tasks::AgentTask>, String> {
 #[tauri::command]
 fn get_agent_session(task_id: String) -> Result<agent_tasks::AgentSessionView, String> {
     agent_tasks::get_session_view(&task_id)
+}
+
+#[tauri::command]
+fn get_pending_ask_prompt() -> Option<AgentAskPromptEvent> {
+    PENDING_ASK_PROMPT.lock().ok().and_then(|prompt| prompt.clone())
+}
+
+#[tauri::command]
+fn show_ask_overlay(app: AppHandle) -> Result<(), String> {
+    let event = PENDING_ASK_PROMPT
+        .lock()
+        .map_err(|_| "lock error")?
+        .clone()
+        .ok_or_else(|| "没有待回应的问题。".to_string())?;
+
+    if let Some(window) = app.get_webview_window("agent-ask-overlay") {
+        let _ = window.emit("agent-ask-prompt", &event);
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    match WebviewWindowBuilder::new(
+        &app,
+        "agent-ask-overlay",
+        WebviewUrl::App("index.html#/ask-overlay".into()),
+    )
+    .title("Agent needs input")
+    .inner_size(480.0, 460.0)
+    .resizable(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .center()
+    .build()
+    {
+        Ok(window) => {
+            let _ = window.emit("agent-ask-prompt", &event);
+            let _ = window.set_focus();
+        }
+        Err(error) => return Err(format!("打开弹窗失败：{}", error)),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn submit_ask_prompt_answer(app: AppHandle, task_id: String, answer: String) -> Result<(), String> {
+    let answer = answer.trim().to_string();
+    if answer.is_empty() {
+        return Err("请选择一个答案。".to_string());
+    }
+
+    let _ = agent_tasks::append_event(&app, &task_id, "user-answer", &answer);
+    let _ = agent_tasks::mark_continuing(&app, &task_id, &answer);
+    if let Ok(mut prompt) = PENDING_ASK_PROMPT.lock() {
+        if prompt.as_ref().map(|value| value.task_id.as_str()) == Some(task_id.as_str()) {
+            *prompt = None;
+        }
+    }
+    if let Some(window) = app.get_webview_window("agent-ask-overlay") {
+        let _ = window.close();
+    }
+
+    continue_agent_task_after_answer(app, task_id, answer);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1127,6 +1214,54 @@ async fn optimize_transcript_with_pi(text: String) -> Result<String, String> {
         .map_err(|error| format!("pi rpc task join failed: {}", error))?
 }
 
+fn continue_agent_task_after_answer(app: AppHandle, task_id: String, answer: String) {
+    tauri::async_runtime::spawn(async move {
+        let task = match agent_tasks::get_task(&task_id) {
+            Ok(task) => task,
+            Err(error) => {
+                eprintln!("[ask-overlay] failed to load task for continue: {}", error);
+                return;
+            }
+        };
+        let session_path = std::path::PathBuf::from(task.session_path.clone());
+        let app_for_task = app.clone();
+        let task_id_for_events = task_id.clone();
+        let message = format!("用户已选择：{}\n\n请基于这个选择继续执行。", answer);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            pi_rpc::continue_agent_task(&message, &session_path, |kind, message| {
+                let _ = agent_tasks::append_event(&app_for_task, &task_id_for_events, kind, message);
+            })
+        })
+        .await;
+
+        match result {
+            Ok(Ok(final_text)) => {
+                if final_text.trim().is_empty() {
+                    let _ = agent_tasks::append_event(&app, &task_id, "continue-empty", "Agent 继续执行后没有输出。");
+                    return;
+                }
+                let _ = agent_tasks::mark_completed(&app, &task_id, &final_text);
+                if let Ok(task) = agent_tasks::get_task(&task_id) {
+                    notify_agent_task_completed(&app, &task, &final_text);
+                }
+            }
+            Ok(Err(error)) => {
+                let _ = agent_tasks::mark_failed(&app, &task_id, &error);
+                if let Ok(task) = agent_tasks::get_task(&task_id) {
+                    notify_agent_task_failed(&app, &task, &error);
+                }
+            }
+            Err(error) => {
+                let message = format!("pi agent continue task join failed: {}", error);
+                let _ = agent_tasks::mark_failed(&app, &task_id, &message);
+                if let Ok(task) = agent_tasks::get_task(&task_id) {
+                    notify_agent_task_failed(&app, &task, &message);
+                }
+            }
+        }
+    });
+}
+
 async fn run_agent_task_with_pi(
     app: AppHandle,
     task: agent_tasks::AgentTask,
@@ -1160,6 +1295,89 @@ fn notify_agent_task_completed(app: &AppHandle, task: &agent_tasks::AgentTask, f
     );
     native_hud::show_success(app, &display_text);
     schedule_hide_hud(app, 4200);
+}
+
+fn show_agent_ask_overlay(
+    app: &AppHandle,
+    task: &agent_tasks::AgentTask,
+    prompt: pi_rpc::AskPromptPayload,
+) {
+    let event = AgentAskPromptEvent {
+        task_id: task.id.clone(),
+        title: task.title.clone(),
+        questions: prompt
+            .questions
+            .into_iter()
+            .map(|question| AgentAskPromptQuestion {
+                question: question.question,
+                header: question.header,
+                options: question
+                    .options
+                    .into_iter()
+                    .map(|option| AgentAskPromptOption {
+                        label: option.label,
+                        description: option.description,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        timestamp_ms: now_unix_ms(),
+    };
+
+    if let Ok(mut prompt) = PENDING_ASK_PROMPT.lock() {
+        *prompt = Some(event.clone());
+    }
+
+    if let Some(window) = app.get_webview_window("agent-ask-overlay") {
+        let _ = window.emit("agent-ask-prompt", &event);
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    match WebviewWindowBuilder::new(
+        app,
+        "agent-ask-overlay",
+        WebviewUrl::App("index.html#/ask-overlay".into()),
+    )
+    .title("Agent needs input")
+    .inner_size(480.0, 460.0)
+    .resizable(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .center()
+    .build()
+    {
+        Ok(window) => {
+            let window: WebviewWindow = window;
+            let _ = window.emit("agent-ask-prompt", &event);
+            let _ = window.set_focus();
+        }
+        Err(error) => eprintln!("[ask-overlay] failed to show overlay: {}", error),
+    }
+}
+
+fn notify_agent_task_needs_attention(
+    app: &AppHandle,
+    task: &agent_tasks::AgentTask,
+    prompt: &str,
+) {
+    let summary = summarize_notification_text(prompt).unwrap_or_else(|| task.title.clone());
+    let display_text = format!("需要回应 · {}", truncate_chars(&summary, 76));
+    let spoken_text = format!("Agent 需要你回应：{}", truncate_chars(&summary, 80));
+
+    emit_agent_notification(
+        app,
+        task,
+        "needs_attention",
+        &summary,
+        &display_text,
+        &spoken_text,
+    );
+    native_hud::show_processing_text(app, &display_text);
+    schedule_hide_hud(app, 5200);
+    speak_notification(&spoken_text);
 }
 
 fn notify_agent_task_failed(app: &AppHandle, task: &agent_tasks::AgentTask, error: &str) {
@@ -1533,6 +1751,21 @@ async fn finish_agent_transcript(app: &AppHandle, timing_snapshot: &HotkeyTiming
                     final_text.chars().count()
                 ),
             );
+
+            if final_text.trim().is_empty() {
+                if let Some(prompt) = agent_tasks::detect_pending_question(&task) {
+                    let _ = agent_tasks::mark_needs_attention(app, &task.id, &prompt);
+                    notify_agent_task_needs_attention(app, &task, &prompt);
+                    emit_hotkey_state(
+                        app,
+                        RecordingPurpose::Agent,
+                        "needs_attention",
+                        "Agent needs your response",
+                    );
+                    return;
+                }
+            }
+
             let _ = agent_tasks::mark_completed(app, &task.id, &final_text);
             notify_agent_task_completed(app, &task, &final_text);
             emit_hotkey_state(
@@ -1543,6 +1776,50 @@ async fn finish_agent_transcript(app: &AppHandle, timing_snapshot: &HotkeyTiming
             );
         }
         Err(error) => {
+            if let Some(prompt_payload) = pi_rpc::parse_needs_attention_error(&error) {
+                let prompt = prompt_payload
+                    .questions
+                    .first()
+                    .map(|question| question.question.clone())
+                    .unwrap_or_else(|| "Agent 需要用户回应才能继续。".to_string());
+                log_timing(
+                    Some(app),
+                    timing_snapshot.session_id,
+                    "agent_task_needs_attention",
+                    agent_started_at.elapsed().as_millis(),
+                    &format!("task_id={}, prompt_chars={}", task.id, prompt.chars().count()),
+                );
+                let _ = agent_tasks::mark_needs_attention(app, &task.id, &prompt);
+                show_agent_ask_overlay(app, &task, prompt_payload);
+                notify_agent_task_needs_attention(app, &task, &prompt);
+                emit_hotkey_state(
+                    app,
+                    RecordingPurpose::Agent,
+                    "needs_attention",
+                    "Agent needs your response",
+                );
+                return;
+            }
+
+            if let Some(prompt) = agent_tasks::detect_pending_question(&task) {
+                log_timing(
+                    Some(app),
+                    timing_snapshot.session_id,
+                    "agent_task_needs_attention",
+                    agent_started_at.elapsed().as_millis(),
+                    &format!("task_id={}, prompt_chars={}", task.id, prompt.chars().count()),
+                );
+                let _ = agent_tasks::mark_needs_attention(app, &task.id, &prompt);
+                notify_agent_task_needs_attention(app, &task, &prompt);
+                emit_hotkey_state(
+                    app,
+                    RecordingPurpose::Agent,
+                    "needs_attention",
+                    "Agent needs your response",
+                );
+                return;
+            }
+
             log_timing(
                 Some(app),
                 timing_snapshot.session_id,
@@ -1658,6 +1935,9 @@ pub fn run() {
             get_agent_tasks,
             get_agent_session,
             start_agent_terminal,
+            get_pending_ask_prompt,
+            show_ask_overlay,
+            submit_ask_prompt_answer,
             write_agent_terminal,
             resize_agent_terminal,
             stop_agent_terminal,
