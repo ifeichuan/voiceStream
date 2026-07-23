@@ -191,3 +191,11 @@ export interface AgentSessionView {
   entries: AgentSessionEntry[];
   parse_errors: string[];
 }
+
+export interface DictationRecord {
+  id: number;
+  raw_text: string;
+  optimized_text: string | null;
+  template_key: string | null;
+  created_at: number;
+}

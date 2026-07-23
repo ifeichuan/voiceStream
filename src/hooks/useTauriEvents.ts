@@ -4,6 +4,7 @@ import { useLogsStore } from "../stores/logs";
 import { useRecordingStore } from "../stores/recording";
 import { useAgentStore } from "../stores/agent";
 import { useSettingsStore } from "../stores/settings";
+import { useDictationStore } from "../stores/dictation";
 import type {
   AudioChunk,
   AudioLevelEvent,
@@ -36,6 +37,7 @@ export function useTauriEvents() {
 
     void useAgentStore.getState().loadAgentTasks();
     void useSettingsStore.getState().loadSettings();
+    void useDictationStore.getState().loadHistory();
 
     void listen<AudioChunk>("audio-chunk", (event) => {
       const chunk = event.payload;
@@ -79,6 +81,9 @@ export function useTauriEvents() {
       if (["pasted", "error", "completed", "failed"].includes(event.payload.state)) {
         useRecordingStore.getState().setAudioLevel(0);
         useRecordingStore.getState().flushSessionBuffer();
+        if (event.payload.state === "pasted" && event.payload.purpose === "dictation") {
+          void useDictationStore.getState().loadHistory();
+        }
       } else if (event.payload.state !== "recording") {
         useRecordingStore.getState().setAudioLevel(0);
       }

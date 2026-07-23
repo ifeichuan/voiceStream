@@ -1056,6 +1056,25 @@ fn copy_to_clipboard(text: String) -> Result<(), String> {
     write_clipboard_text(&text)
 }
 
+#[tauri::command]
+fn get_dictation_history(
+    query: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<db::DictationRecord>, String> {
+    db::get_dictations(query.as_deref(), limit.unwrap_or(20), offset.unwrap_or(0))
+}
+
+#[tauri::command]
+fn get_dictation_count(query: Option<String>) -> Result<i64, String> {
+    db::get_dictation_count(query.as_deref())
+}
+
+#[tauri::command]
+fn delete_dictation(id: i64) -> Result<(), String> {
+    db::delete_dictation(id)
+}
+
 #[derive(Debug, Serialize, Clone)]
 struct PermissionStatus {
     accessibility: bool,
@@ -1634,7 +1653,8 @@ async fn finish_dictation_transcript(
     );
 
     let optimize_started_at = Instant::now();
-    let (final_text, pasted_message) = match optimize_transcript_with_pi(text.clone()).await {
+    let raw_text = text.clone();
+    let (final_text, pasted_message) = match optimize_transcript_with_pi(text).await {
         Ok(refined) if !refined.trim().is_empty() => {
             log_timing(
                 Some(app),
@@ -1643,7 +1663,7 @@ async fn finish_dictation_transcript(
                 optimize_started_at.elapsed().as_millis(),
                 &format!(
                     "input_chars={}, output_chars={}, optimized=true",
-                    text.chars().count(),
+                    raw_text.chars().count(),
                     refined.chars().count()
                 ),
             );
@@ -1657,10 +1677,10 @@ async fn finish_dictation_transcript(
                 optimize_started_at.elapsed().as_millis(),
                 &format!(
                     "input_chars={}, output_chars=0, optimized=false-empty",
-                    text.chars().count()
+                    raw_text.chars().count()
                 ),
             );
-            (text, "Pasted raw transcript".to_string())
+            (raw_text.clone(), "Pasted raw transcript".to_string())
         }
         Err(error) => {
             log_timing(
@@ -1672,7 +1692,7 @@ async fn finish_dictation_transcript(
             );
             eprintln!("pi optimization failed: {}", error);
             (
-                text,
+                raw_text.clone(),
                 "Pi optimize failed, pasted raw transcript".to_string(),
             )
         }
@@ -1698,6 +1718,16 @@ async fn finish_dictation_transcript(
             native_hud::show_success(app, &final_text);
             schedule_hide_hud(app, 850);
             emit_hotkey_state(app, RecordingPurpose::Dictation, "pasted", &pasted_message);
+
+            let template_key = settings::runtime_pi_settings().prompt_template_key;
+            let optimized = if final_text != raw_text {
+                Some(final_text.as_str())
+            } else {
+                None
+            };
+            if let Err(e) = db::insert_dictation(&raw_text, optimized, Some(&template_key)) {
+                eprintln!("[dictation] failed to save history: {}", e);
+            }
         }
         Err(error) => {
             log_timing(
@@ -1954,6 +1984,9 @@ pub fn run() {
             stop_recording,
             play_recorded,
             copy_to_clipboard,
+            get_dictation_history,
+            get_dictation_count,
+            delete_dictation,
             check_permissions,
             open_accessibility_settings,
         ])
