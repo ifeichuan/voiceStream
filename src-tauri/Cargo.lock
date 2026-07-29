@@ -3777,7 +3777,7 @@ dependencies = [
 
 [[package]]
 name = "speakmore"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
