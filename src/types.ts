@@ -34,6 +34,8 @@ export interface SttSettingsView {
   language: string;
   sample_rate: number;
   extra_config: string;
+  hot_words: string;
+  context_minutes: number;
   has_api_key: boolean;
   api_key_hint: string;
 }

@@ -33,6 +33,15 @@ pub struct SttSettingsInput {
     pub sample_rate: Option<u32>,
     #[serde(default)]
     pub extra_config: String,
+    /// 热词表 JSON：`[{"text": "...", "weight": 4}]`，空串表示不启用。
+    #[serde(default)]
+    pub hot_words: String,
+    /// LLM 上下文增强窗口（分钟），识别时携带近 N 分钟的历史听写文本。
+    #[serde(default = "default_context_minutes")]
+    pub context_minutes: u32,
+    /// 百炼热词表 ID（内部维护，由 sync_stt_vocabulary 写回）。
+    #[serde(default)]
+    pub vocabulary_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,8 +53,14 @@ pub struct SttSettingsView {
     pub language: String,
     pub sample_rate: u32,
     pub extra_config: String,
+    pub hot_words: String,
+    pub context_minutes: u32,
     pub has_api_key: bool,
     pub api_key_hint: String,
+}
+
+fn default_context_minutes() -> u32 {
+    20
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,6 +180,12 @@ struct StoredSttSettings {
     sample_rate: u32,
     #[serde(default)]
     extra_config: String,
+    #[serde(default)]
+    hot_words: String,
+    #[serde(default = "default_context_minutes")]
+    context_minutes: u32,
+    #[serde(default)]
+    vocabulary_id: String,
 }
 
 fn default_stt_provider_id() -> String {
@@ -282,6 +303,9 @@ pub fn runtime_stt_settings(app: &AppHandle) -> Result<SttSettingsInput, String>
         language: stt.language,
         sample_rate: Some(stt.sample_rate),
         extra_config: stt.extra_config,
+        hot_words: stt.hot_words,
+        context_minutes: stt.context_minutes,
+        vocabulary_id: stt.vocabulary_id,
     })
 }
 
@@ -380,6 +404,9 @@ pub fn stt_test_merged(
         language: merged.language,
         sample_rate: Some(merged.sample_rate),
         extra_config: merged.extra_config,
+        hot_words: merged.hot_words,
+        context_minutes: merged.context_minutes,
+        vocabulary_id: merged.vocabulary_id,
     })
 }
 
@@ -392,6 +419,8 @@ fn stt_view_from_stored(stored: &StoredSttSettings) -> SttSettingsView {
         language: stored.language.clone(),
         sample_rate: stored.sample_rate,
         extra_config: stored.extra_config.clone(),
+        hot_words: stored.hot_words.clone(),
+        context_minutes: stored.context_minutes,
         has_api_key: !stored.api_key.is_empty(),
         api_key_hint: mask_api_key(&stored.api_key),
     }
@@ -443,6 +472,14 @@ fn merge_stt_settings(
         language: input.language.trim().to_string(),
         sample_rate: input.sample_rate.unwrap_or(existing.sample_rate),
         extra_config: input.extra_config.trim().to_string(),
+        hot_words: input.hot_words.trim().to_string(),
+        context_minutes: input.context_minutes.clamp(1, 480),
+        // 前端保存时不会携带 vocabulary_id；仅在内部同步时显式更新。
+        vocabulary_id: if input.vocabulary_id.is_empty() {
+            existing.vocabulary_id.clone()
+        } else {
+            input.vocabulary_id.trim().to_string()
+        },
     }
 }
 
@@ -602,6 +639,9 @@ fn default_stt_settings() -> StoredSttSettings {
         language: String::new(),
         sample_rate: 16_000,
         extra_config: String::new(),
+        hot_words: crate::hotwords::default_hot_words_json(),
+        context_minutes: default_context_minutes(),
+        vocabulary_id: String::new(),
     }
 }
 

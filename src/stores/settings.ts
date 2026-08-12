@@ -46,6 +46,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     language: "",
     sample_rate: 16000,
     extra_config: "",
+    hot_words: "",
+    context_minutes: 20,
     has_api_key: false,
     api_key_hint: "",
   },
@@ -125,6 +127,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             language: sttSettings.language,
             sample_rate: sttSettings.sample_rate || null,
             extra_config: sttSettings.extra_config,
+            hot_words: sttSettings.hot_words,
+            context_minutes: sttSettings.context_minutes || 20,
           },
           pi: {
             mode: normalizePiMode(piSettings.mode),
@@ -177,6 +181,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           language: sttSettings.language,
           sample_rate: sttSettings.sample_rate || null,
           extra_config: sttSettings.extra_config,
+          hot_words: sttSettings.hot_words,
+          context_minutes: sttSettings.context_minutes || 20,
         },
       });
       set({ settingsStatus: message });

@@ -1,11 +1,58 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../stores/settings";
 import type { SttProviderMeta } from "../types";
+
+/** 每行一个热词 ↔ JSON 数组（weight 统一 4）互转 */
+function linesToHotWordsJson(text: string): string {
+  const words = text
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return JSON.stringify(words.map((w) => ({ text: w, weight: 4 })));
+}
+
+function hotWordsJsonToLines(json: string): string {
+  if (!json.trim()) return "";
+  try {
+    const items = JSON.parse(json);
+    if (!Array.isArray(items)) return "";
+    return items
+      .map((item) => (typeof item === "string" ? item : item?.text ?? ""))
+      .filter((w: string) => w.length > 0)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
 
 export default function Speech() {
   const { sttSettings, sttProviders, setSttSettings, apiKeyInput, setApiKeyInput } =
     useSettingsStore();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [hotWordsText, setHotWordsText] = useState(() =>
+    hotWordsJsonToLines(sttSettings.hot_words)
+  );
+
+  // 设置加载后同步热词文本区
+  useEffect(() => {
+    setHotWordsText(hotWordsJsonToLines(sttSettings.hot_words));
+  }, [sttSettings.hot_words]);
+
+  const applyHotWords = (text: string) => {
+    setHotWordsText(text);
+    setSttSettings((prev) => ({ ...prev, hot_words: linesToHotWordsJson(text) }));
+  };
+
+  const restoreDefaultHotWords = async () => {
+    try {
+      const json = await invoke<string>("get_default_stt_hot_words");
+      setHotWordsText(hotWordsJsonToLines(json));
+      setSttSettings((prev) => ({ ...prev, hot_words: json }));
+    } catch {
+      setHotWordsText("");
+    }
+  };
 
   const currentMeta: SttProviderMeta | undefined = sttProviders.find(
     (p) => p.id === sttSettings.provider
@@ -173,6 +220,64 @@ export default function Speech() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* Hot words & context */}
+      <section>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">热词与上下文</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">
+          热词提升特定词汇的识别率；上下文把近期听写文本带给引擎，辅助同音词与英文纠错。
+        </p>
+
+        <div className="mt-8 grid gap-0">
+          {/* Hot words */}
+          <div className="form-row items-start">
+            <span className="form-row-label pt-2">热词表</span>
+            <div className="form-row-control">
+              <textarea
+                className="h-44 w-full resize-y rounded border border-paper-line bg-transparent px-3 py-2 text-[0.86rem] leading-relaxed text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                value={hotWordsText}
+                onChange={(e) => applyHotWords(e.target.value)}
+                placeholder={"每行一个热词\n例如：\nyyds\n内卷\nChatGPT"}
+              />
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <small className="text-[0.75rem] leading-snug text-paper-muted">
+                  每行一个词；纯中文不超过 10 字，英文或中英混合按空格分词不超过 5 词。
+                </small>
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-paper-line px-2.5 py-1 text-[0.75rem] text-paper-muted transition-colors duration-150 hover:text-paper-ink"
+                  onClick={restoreDefaultHotWords}
+                >
+                  恢复默认
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Context window */}
+          <div className="form-row">
+            <span className="form-row-label">上下文窗口</span>
+            <div className="form-row-control">
+              <input
+                className="w-full rounded border-0 border-b border-paper-line bg-transparent px-0 py-2 text-right text-paper-ink outline-none transition duration-150 focus:border-paper-accent"
+                type="number"
+                min={0}
+                max={480}
+                value={sttSettings.context_minutes}
+                onChange={(e) =>
+                  setSttSettings((prev) => ({
+                    ...prev,
+                    context_minutes: Math.max(0, parseInt(e.target.value, 10) || 0),
+                  }))
+                }
+              />
+              <small className="mt-1 block text-right text-[0.75rem] text-paper-muted">
+                分钟；识别时携带近 N 分钟内的历史听写文本，填 0 关闭
+              </small>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

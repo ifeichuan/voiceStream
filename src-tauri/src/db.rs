@@ -308,6 +308,35 @@ pub fn get_dictations(
     }
 }
 
+/// 查询最近 `minutes` 分钟内的听写记录（按时间倒序，取 `limit` 条）。
+/// 用于 LLM 上下文增强：把近期输入传给 ASR 辅助纠错。
+pub fn get_recent_dictations(minutes: i64, limit: i64) -> Result<Vec<DictationRecord>, String> {
+    let conn = connection()?;
+    let since = now_unix() - minutes * 60;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, raw_text, optimized_text, template_key, created_at
+             FROM dictations
+             WHERE created_at >= ?1
+             ORDER BY created_at DESC
+             LIMIT ?2",
+        )
+        .map_err(|e| format!("prepare get_recent_dictations failed: {}", e))?;
+    let rows = stmt
+        .query_map(params![since, limit], |row| {
+            Ok(DictationRecord {
+                id: row.get(0)?,
+                raw_text: row.get(1)?,
+                optimized_text: row.get(2)?,
+                template_key: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("query get_recent_dictations failed: {}", e))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect get_recent_dictations failed: {}", e))
+}
+
 pub fn get_dictation_count(query: Option<&str>) -> Result<i64, String> {
     let conn = connection()?;
     match query.filter(|q| !q.is_empty()) {

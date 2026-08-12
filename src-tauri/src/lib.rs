@@ -2,6 +2,7 @@ mod agent_tasks;
 mod agent_terminal;
 mod audio;
 mod db;
+mod hotwords;
 mod native_hud;
 mod pi_rpc;
 mod rpc_terminal;
@@ -1052,6 +1053,11 @@ fn play_recorded() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_default_stt_hot_words() -> String {
+    crate::hotwords::default_hot_words_json()
+}
+
+#[tauri::command]
 fn copy_to_clipboard(text: String) -> Result<(), String> {
     write_clipboard_text(&text)
 }
@@ -1978,6 +1984,7 @@ pub fn run() {
             continue_agent_task,
             save_stt_settings,
             test_stt_settings,
+            get_default_stt_hot_words,
             get_app_settings,
             save_app_settings,
             start_recording,

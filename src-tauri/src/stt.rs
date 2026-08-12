@@ -1,4 +1,6 @@
 use crate::audio::convert_chunk_to_pcm16;
+use crate::db;
+use crate::hotwords;
 use crate::native_hud;
 use crate::settings;
 use futures_util::{SinkExt, StreamExt};
@@ -535,6 +537,80 @@ async fn test_connection(settings: StoredSttSettings) -> Result<(), String> {
     }
 }
 
+/// 组装百炼 run-task JSON：携带热词表（若可用）与近 N 分钟上下文（若开启）。
+/// 热词同步失败或上下文查询失败时静默降级，不阻断识别。
+async fn build_run_task(
+    settings: &StoredSttSettings,
+    app: &AppHandle,
+    task_id: &str,
+) -> Result<Value, String> {
+    let mut parameters = json!({
+        "format": "pcm",
+        "sample_rate": TARGET_SAMPLE_RATE
+    });
+
+    // 热词：同步云端词表（缓存命中时零网络开销），失败则降级不传。
+    if !settings.hot_words.trim().is_empty() {
+        match hotwords::sync_vocabulary(app, settings).await {
+            Ok(Some(vocabulary_id)) => {
+                parameters["vocabulary_id"] = json!(vocabulary_id);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("[stt] hot words sync skipped: {}", error);
+            }
+        }
+    }
+
+    // 上下文增强：近 N 分钟的历史听写文本，按时间正序传入。
+    let mut input = json!({});
+    if settings.context_minutes > 0 {
+        if let Ok(records) = db::get_recent_dictations(settings.context_minutes as i64, 30) {
+            if !records.is_empty() {
+                let mut context: Vec<Value> = Vec::new();
+                let mut total_chars = 0usize;
+                for record in records.iter().rev() {
+                    let text = record
+                        .optimized_text
+                        .as_deref()
+                        .unwrap_or(&record.raw_text)
+                        .trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    total_chars += text.chars().count();
+                    if total_chars > 2_000 {
+                        break;
+                    }
+                    context.push(json!({
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": text}]
+                    }));
+                }
+                if !context.is_empty() {
+                    input["context"] = Value::Array(context);
+                }
+            }
+        }
+    }
+
+    Ok(json!({
+        "header": {
+            "action": "run-task",
+            "task_id": task_id,
+            "streaming": "duplex"
+        },
+        "payload": {
+            "task_group": "audio",
+            "task": "asr",
+            "function": "recognition",
+            "model": settings.model,
+            "parameters": parameters,
+            "input": input
+        }
+    }))
+}
+
 async fn run_session(
     app: AppHandle,
     settings: StoredSttSettings,
@@ -556,24 +632,7 @@ async fn run_session(
             .unwrap_or(0)
     );
 
-    let run_task = json!({
-        "header": {
-            "action": "run-task",
-            "task_id": task_id,
-            "streaming": "duplex"
-        },
-        "payload": {
-            "task_group": "audio",
-            "task": "asr",
-            "function": "recognition",
-            "model": settings.model,
-            "parameters": {
-                "format": "pcm",
-                "sample_rate": TARGET_SAMPLE_RATE
-            },
-            "input": {}
-        }
-    });
+    let run_task = build_run_task(&settings, &app, &task_id).await?;
 
     writer
         .send(Message::Text(run_task.to_string().into()))
