@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { useAgentStore } from "../stores/agent";
 import type { AgentNotificationEvent } from "../types";
+import { Markdown } from "./Markdown";
 
 const AUTO_DISMISS_MS = 8000;
 
@@ -154,9 +155,7 @@ export function AgentNotice() {
               </button>
             </div>
             <div className="max-h-[calc(min(720px,100vh-48px)-128px)] overflow-auto px-5 py-4">
-              <p className="whitespace-pre-wrap text-[0.92rem] leading-[1.7] text-paper-ink">
-                {dialog.body}
-              </p>
+              <Markdown>{dialog.body}</Markdown>
             </div>
             <div className="flex justify-end gap-2 border-t border-paper-line px-5 py-3">
               <button

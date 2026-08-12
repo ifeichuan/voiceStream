@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@source "../node_modules/@assistant-ui/react-streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/cjk/dist/*.js";
+@source "../node_modules/@assistant-ui/react-streamdown/../../streamdown/dist/*.js";
+
 @theme {
   --color-paper-bg: #fdfcfc;
   --color-paper-surface: #f9f8f8;
@@ -11,8 +16,32 @@
   --font-mono: "Geist Mono Variable", "SF Mono", Menlo, Monaco, Consolas, monospace;
 }
 
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-sidebar: var(--sidebar);
+  --radius-sm: calc(var(--radius) - 0.125rem);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 0.125rem);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+}
+
 @layer base {
   :root {
+    --background: var(--color-paper-bg);
+    --foreground: var(--color-paper-ink);
+    --muted: var(--color-paper-surface-soft);
+    --muted-foreground: var(--color-paper-muted);
+    --border: var(--color-paper-line);
+    --primary: var(--color-paper-accent);
+    --primary-foreground: var(--color-paper-surface);
+    --sidebar: var(--color-paper-surface);
+    --radius: 0.25rem;
     font-family: "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
     color: var(--color-paper-ink);
     background: linear-gradient(180deg, var(--color-paper-surface) 0%, var(--color-paper-bg) 100%);
@@ -73,6 +102,15 @@
     --color-paper-muted: #9a9595;
     --color-paper-line: #3d3838;
     --color-paper-accent: #007aff;
+    --background: var(--color-paper-bg);
+    --foreground: var(--color-paper-ink);
+    --muted: var(--color-paper-surface-soft);
+    --muted-foreground: var(--color-paper-muted);
+    --border: var(--color-paper-line);
+    --primary: var(--color-paper-accent);
+    --primary-foreground: var(--color-paper-surface);
+    --sidebar: var(--color-paper-surface);
+    --radius: 0.25rem;
   }
 }
 
@@ -169,6 +207,90 @@
   }
 }
 
+@layer utilities {
+  .markdown-content {
+    @apply min-w-0 text-[0.9rem] leading-[1.7] text-paper-ink;
+  }
+
+  .markdown-content :where(h1, h2, h3, h4, h5, h6) {
+    @apply mt-6 mb-2 font-semibold text-paper-ink;
+  }
+
+  .markdown-content :where(h1) {
+    @apply text-[1.2rem];
+  }
+
+  .markdown-content :where(h2) {
+    @apply text-[1.08rem];
+  }
+
+  .markdown-content :where(h3, h4, h5, h6) {
+    @apply text-[0.96rem];
+  }
+
+  .markdown-content :where(p, ul, ol, blockquote, pre, table) {
+    @apply my-3;
+  }
+
+  .markdown-content :where(ul, ol) {
+    @apply space-y-1 pl-6;
+  }
+
+  .markdown-content :where(ul) {
+    @apply list-disc;
+  }
+
+  .markdown-content :where(ol) {
+    @apply list-decimal;
+  }
+
+  .markdown-content :where(li) {
+    @apply pl-0.5;
+  }
+
+  .markdown-content :where(blockquote) {
+    @apply border-l-2 border-paper-line pl-4 text-paper-muted;
+  }
+
+  .markdown-content :where(a) {
+    @apply cursor-pointer break-words text-paper-accent underline decoration-paper-accent/35 underline-offset-2 transition-colors hover:decoration-paper-accent;
+  }
+
+  .markdown-content :where(code):not(pre code) {
+    @apply break-words rounded bg-paper-surface-soft px-1.5 py-0.5 font-mono text-[0.82rem];
+  }
+
+  .markdown-image-placeholder {
+    @apply inline rounded bg-paper-surface-soft px-1.5 py-0.5 text-[0.82rem] text-paper-muted;
+  }
+
+  .markdown-content :where(pre) {
+    @apply max-w-full overflow-x-auto rounded border border-paper-line bg-paper-surface-soft text-[0.8rem] leading-[1.6];
+  }
+
+  .markdown-content :where(table) {
+    @apply w-full border-collapse text-left text-[0.84rem];
+  }
+
+  .markdown-content :where(th, td) {
+    @apply border border-paper-line px-3 py-2 align-top;
+  }
+
+  .markdown-content :where(th) {
+    @apply bg-paper-surface-soft font-semibold;
+  }
+
+  .markdown-content > :first-child,
+  .markdown-content [data-streamdown] > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-content > :last-child,
+  .markdown-content [data-streamdown] > :last-child {
+    margin-bottom: 0;
+  }
+}
+
 
 .agent-terminal {
   border: 1px solid var(--color-paper-line);
@@ -184,4 +306,3 @@
 .agent-terminal .xterm-viewport {
   scrollbar-gutter: stable;
 }
-
