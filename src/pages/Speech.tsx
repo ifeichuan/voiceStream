@@ -27,8 +27,15 @@ function hotWordsJsonToLines(json: string): string {
 }
 
 export default function Speech() {
-  const { sttSettings, sttProviders, setSttSettings, apiKeyInput, setApiKeyInput } =
-    useSettingsStore();
+  const {
+    sttSettings,
+    sttProviders,
+    setSttSettings,
+    audioSettings,
+    setAudioSettings,
+    apiKeyInput,
+    setApiKeyInput,
+  } = useSettingsStore();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [hotWordsText, setHotWordsText] = useState(() =>
     hotWordsJsonToLines(sttSettings.hot_words)
@@ -75,6 +82,35 @@ export default function Speech() {
 
   return (
     <div className="grid gap-12 pt-[2vh]">
+      <section>
+        <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">麦克风</h3>
+        <p className="mt-1.5 text-[0.86rem] text-paper-muted">
+          听写时抵消本机扬声器漏进麦克风的声音。
+        </p>
+
+        <div className="mt-8 grid gap-0">
+          <div className="form-row">
+            <span className="form-row-label">抑制扬声器声音</span>
+            <div className="form-row-control flex justify-end">
+              <input
+                className="h-5 w-5 accent-paper-accent"
+                type="checkbox"
+                checked={audioSettings.suppress_speaker_audio}
+                onChange={(e) =>
+                  setAudioSettings((prev) => ({
+                    ...prev,
+                    suppress_speaker_audio: e.target.checked,
+                  }))
+                }
+              />
+            </div>
+          </div>
+        </div>
+        <p className="mt-2 text-[0.75rem] leading-snug text-paper-muted">
+          使用 macOS 语音处理消除回声。若识别变差，关闭后即回退为原声采集。保存后生效。
+        </p>
+      </section>
+
       <section>
         <h3 className="section-dot text-base font-semibold tracking-[-0.03em]">语音识别</h3>
         <p className="mt-1.5 text-[0.86rem] text-paper-muted">实时识别引擎配置。</p>

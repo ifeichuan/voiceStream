@@ -11,6 +11,7 @@ import type {
   LocalPiConfigView,
   AppSettingsView,
   AgentSettingsView,
+  AudioSettingsView,
 } from "../types";
 
 interface SettingsState {
@@ -19,6 +20,7 @@ interface SettingsState {
   piSettings: PiSettingsView;
   agentSettings: AgentSettingsView;
   shortcutSettings: ShortcutSettingsView;
+  audioSettings: AudioSettingsView;
   localPi: LocalPiConfigView;
   apiKeyInput: string;
   settingsStatus: string;
@@ -28,6 +30,7 @@ interface SettingsState {
   setPiSettings: (fn: (prev: PiSettingsView) => PiSettingsView) => void;
   setAgentSettings: (fn: (prev: AgentSettingsView) => AgentSettingsView) => void;
   setShortcutSettings: (fn: (prev: ShortcutSettingsView) => ShortcutSettingsView) => void;
+  setAudioSettings: (fn: (prev: AudioSettingsView) => AudioSettingsView) => void;
   setLocalPi: (v: LocalPiConfigView) => void;
   setApiKeyInput: (v: string) => void;
   setSettingsStatus: (v: string) => void;
@@ -70,6 +73,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     dictation_shortcut: DEFAULT_SHORTCUT,
     agent_shortcut: DEFAULT_AGENT_SHORTCUT,
   },
+  audioSettings: {
+    suppress_speaker_audio: true,
+  },
   localPi: {
     settings_path: "",
     models_path: "",
@@ -87,6 +93,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setPiSettings: (fn) => set((s) => ({ piSettings: fn(s.piSettings) })),
   setAgentSettings: (fn) => set((s) => ({ agentSettings: fn(s.agentSettings) })),
   setShortcutSettings: (fn) => set((s) => ({ shortcutSettings: fn(s.shortcutSettings) })),
+  setAudioSettings: (fn) => set((s) => ({ audioSettings: fn(s.audioSettings) })),
   setLocalPi: (v) => set({ localPi: v }),
   setApiKeyInput: (v) => set({ apiKeyInput: v }),
   setSettingsStatus: (v) => set({ settingsStatus: v }),
@@ -104,6 +111,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         piSettings: { ...settings.pi, mode: normalizePiMode(settings.pi.mode) },
         agentSettings: settings.agent,
         shortcutSettings: settings.shortcuts,
+        audioSettings: settings.audio ?? { suppress_speaker_audio: true },
         localPi: settings.local_pi,
         settingsStatus: settings.stt.has_api_key ? "已保存到本地" : "未配置 API Key",
       });
@@ -114,7 +122,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   saveSettings: async () => {
     const addLog = useLogsStore.getState().addLog;
-    const { sttSettings, piSettings, agentSettings, shortcutSettings, apiKeyInput } = get();
+    const { sttSettings, piSettings, agentSettings, shortcutSettings, audioSettings, apiKeyInput } = get();
     try {
       const saved = await invoke<AppSettingsView>("save_app_settings", {
         settings: {
@@ -147,6 +155,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             model: agentSettings.model,
             thinking: agentSettings.thinking,
           },
+          audio: {
+            suppress_speaker_audio: audioSettings.suppress_speaker_audio,
+          },
         },
       });
       set({
@@ -154,6 +165,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         piSettings: { ...saved.pi, mode: normalizePiMode(saved.pi.mode) },
         agentSettings: saved.agent,
         shortcutSettings: saved.shortcuts,
+        audioSettings: saved.audio ?? { suppress_speaker_audio: true },
         localPi: saved.local_pi,
         apiKeyInput: "",
         settingsStatus: "已保存到本地",

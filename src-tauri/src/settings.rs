@@ -82,12 +82,24 @@ pub struct AgentSettingsInput {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AudioSettingsInput {
+    pub suppress_speaker_audio: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AudioSettingsView {
+    pub suppress_speaker_audio: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettingsInput {
     pub stt: SttSettingsInput,
     pub pi: PiSettingsInput,
     pub shortcuts: ShortcutSettingsInput,
     #[serde(default)]
     pub agent: Option<AgentSettingsInput>,
+    #[serde(default)]
+    pub audio: Option<AudioSettingsInput>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -120,6 +132,7 @@ pub struct AppSettingsView {
     pub shortcuts: ShortcutSettingsView,
     pub local_pi: LocalPiConfigView,
     pub agent: AgentSettingsView,
+    pub audio: AudioSettingsView,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -224,6 +237,16 @@ struct StoredAgentSettings {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct StoredAudioSettings {
+    #[serde(default = "default_suppress_speaker_audio")]
+    suppress_speaker_audio: bool,
+}
+
+fn default_suppress_speaker_audio() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct StoredAppSettings {
     version: u32,
     stt: StoredSttSettings,
@@ -232,6 +255,8 @@ struct StoredAppSettings {
     shortcuts: StoredShortcutSettings,
     #[serde(default = "default_agent_settings")]
     agent: StoredAgentSettings,
+    #[serde(default = "default_audio_settings")]
+    audio: StoredAudioSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -253,6 +278,7 @@ pub fn load_app_settings_view(app: &AppHandle) -> Result<AppSettingsView, String
         shortcuts: shortcuts_view_from_stored(&stored.shortcuts),
         local_pi: read_local_pi_config(),
         agent: agent_view_from_stored(&stored.agent),
+        audio: audio_view_from_stored(&stored.audio),
     })
 }
 
@@ -267,6 +293,7 @@ pub fn save_app_settings(
         pi: merge_pi_settings(Some(existing.pi), input.pi),
         shortcuts: merge_shortcut_settings(Some(existing.shortcuts), input.shortcuts),
         agent: merge_agent_settings(Some(existing.agent), input.agent),
+        audio: merge_audio_settings(Some(existing.audio), input.audio),
     };
     write_app_settings(app, &next)?;
     load_app_settings_view(app)
@@ -287,6 +314,7 @@ pub fn save_stt_settings(
         pi: existing.pi,
         shortcuts: existing.shortcuts,
         agent: existing.agent,
+        audio: existing.audio,
     };
     write_app_settings(app, &next)?;
     Ok(stt_view_from_stored(&next.stt))
@@ -389,6 +417,12 @@ pub fn runtime_shortcut_settings(app: &AppHandle) -> Result<ShortcutSettingsView
     Ok(shortcuts_view_from_stored(&stored.shortcuts))
 }
 
+pub fn runtime_suppress_speaker_audio(app: &AppHandle) -> bool {
+    read_or_migrate_settings(app)
+        .map(|stored| stored.audio.suppress_speaker_audio)
+        .unwrap_or_else(|_| default_suppress_speaker_audio())
+}
+
 pub fn stt_test_merged(
     app: &AppHandle,
     input: SttSettingsInput,
@@ -450,6 +484,12 @@ fn agent_view_from_stored(stored: &StoredAgentSettings) -> AgentSettingsView {
         provider: stored.provider.clone(),
         model: stored.model.clone(),
         thinking: stored.thinking.clone(),
+    }
+}
+
+fn audio_view_from_stored(stored: &StoredAudioSettings) -> AudioSettingsView {
+    AudioSettingsView {
+        suppress_speaker_audio: stored.suppress_speaker_audio,
     }
 }
 
@@ -526,6 +566,19 @@ fn merge_agent_settings(
     }
 }
 
+fn merge_audio_settings(
+    existing: Option<StoredAudioSettings>,
+    input: Option<AudioSettingsInput>,
+) -> StoredAudioSettings {
+    let existing = existing.unwrap_or_else(default_audio_settings);
+    let Some(input) = input else {
+        return existing;
+    };
+    StoredAudioSettings {
+        suppress_speaker_audio: input.suppress_speaker_audio,
+    }
+}
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -555,6 +608,7 @@ fn read_or_migrate_settings(app: &AppHandle) -> Result<StoredAppSettings, String
             pi: default_pi_settings(),
             shortcuts: default_shortcuts_settings(),
             agent: default_agent_settings(),
+            audio: default_audio_settings(),
         };
         write_app_settings(app, &migrated)?;
         return Ok(migrated);
@@ -626,6 +680,7 @@ fn default_app_settings() -> StoredAppSettings {
         pi: default_pi_settings(),
         shortcuts: default_shortcuts_settings(),
         agent: default_agent_settings(),
+        audio: default_audio_settings(),
     }
 }
 
@@ -668,6 +723,12 @@ fn default_agent_settings() -> StoredAgentSettings {
         provider: String::new(),
         model: String::new(),
         thinking: String::new(),
+    }
+}
+
+fn default_audio_settings() -> StoredAudioSettings {
+    StoredAudioSettings {
+        suppress_speaker_audio: default_suppress_speaker_audio(),
     }
 }
 

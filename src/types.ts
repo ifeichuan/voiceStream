@@ -91,12 +91,17 @@ export interface AgentSettingsView {
   thinking: string;
 }
 
+export interface AudioSettingsView {
+  suppress_speaker_audio: boolean;
+}
+
 export interface AppSettingsView {
   stt: SttSettingsView;
   pi: PiSettingsView;
   shortcuts: ShortcutSettingsView;
   local_pi: LocalPiConfigView;
   agent: AgentSettingsView;
+  audio: AudioSettingsView;
 }
 
 export interface ShortcutSettingsView {

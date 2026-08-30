@@ -9,6 +9,8 @@ mod rpc_terminal;
 mod settings;
 mod stt;
 mod stt_providers;
+#[cfg(target_os = "macos")]
+mod voice_processing;
 
 use audio::{normalize_f32_sample, normalize_u16_sample, remix_channels, resample_interleaved};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -783,19 +785,11 @@ fn process_recording_chunk(
     write_pcm_chunk(file_path, &chunk);
 }
 
-fn start_recording_internal(app: AppHandle) -> Result<String, String> {
-    if STREAM_RUNNING.load(Ordering::SeqCst) {
-        return Err("Already recording".to_string());
-    }
-
-    let host = cpal::default_host();
-    let device = host.default_input_device().ok_or("No input device")?;
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("Config error: {}", e))?;
-
-    let sample_rate = config.sample_rate().0;
-    let channels = config.channels();
+fn setup_recording_session(
+    app: &AppHandle,
+    sample_rate: u32,
+    channels: u16,
+) -> Result<String, String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis())
@@ -811,6 +805,69 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
         .lock()
         .map_err(|_| "STT provider lock poisoned".to_string())? = provider;
 
+    *ACTIVE_RECORDING
+        .lock()
+        .map_err(|_| "Recording lock poisoned".to_string())? = Some(ActiveRecording {
+        file_path: file_path.clone(),
+        sample_rate,
+        channels,
+    });
+
+    Ok(file_path)
+}
+
+fn abort_recording_session() {
+    if let Ok(mut recording) = ACTIVE_RECORDING.lock() {
+        recording.take();
+    }
+    if let Ok(mut provider) = ACTIVE_STT_PROVIDER.lock() {
+        provider.take();
+    }
+}
+
+fn start_recording_internal(app: AppHandle) -> Result<String, String> {
+    if STREAM_RUNNING.load(Ordering::SeqCst) {
+        return Err("Already recording".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    if settings::runtime_suppress_speaker_audio(&app) {
+        match start_voice_processing_recording(app.clone()) {
+            Ok(message) => return Ok(message),
+            Err(error) => {
+                eprintln!(
+                    "[speakmore] voice processing unavailable, falling back to raw capture: {}",
+                    error
+                );
+                voice_processing::stop();
+                abort_recording_session();
+            }
+        }
+    }
+
+    start_cpal_recording(app)
+}
+
+#[cfg(target_os = "macos")]
+fn start_voice_processing_recording(app: AppHandle) -> Result<String, String> {
+    let (sample_rate, channels, file_path) = voice_processing::start(app)?;
+    STREAM_RUNNING.store(true, Ordering::SeqCst);
+    Ok(format!(
+        "Recording (AEC): {}Hz {}ch → {}",
+        sample_rate, channels, file_path
+    ))
+}
+
+fn start_cpal_recording(app: AppHandle) -> Result<String, String> {
+    let host = cpal::default_host();
+    let device = host.default_input_device().ok_or("No input device")?;
+    let config = device
+        .default_input_config()
+        .map_err(|e| format!("Config error: {}", e))?;
+
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels();
+    let file_path = setup_recording_session(&app, sample_rate, channels)?;
     let file_path_clone = file_path.clone();
     let err_fn = |err| eprintln!("Record error: {}", err);
 
@@ -856,21 +913,22 @@ fn start_recording_internal(app: AppHandle) -> Result<String, String> {
                 None,
             )
         }
-        _ => return Err("Unsupported format".to_string()),
+        _ => {
+            abort_recording_session();
+            return Err("Unsupported format".to_string());
+        }
     }
-    .map_err(|e| format!("Build error: {}", e))?;
+    .map_err(|e| {
+        abort_recording_session();
+        format!("Build error: {}", e)
+    })?;
 
-    stream.play().map_err(|e| format!("Play error: {}", e))?;
+    if let Err(error) = stream.play() {
+        abort_recording_session();
+        return Err(format!("Play error: {}", error));
+    }
     STREAM_RUNNING.store(true, Ordering::SeqCst);
     replace_recording_stream(Some(stream));
-
-    *ACTIVE_RECORDING
-        .lock()
-        .map_err(|_| "Recording lock poisoned".to_string())? = Some(ActiveRecording {
-        file_path: file_path.clone(),
-        sample_rate,
-        channels,
-    });
 
     Ok(format!(
         "Recording: {}Hz {}ch → {}",
@@ -889,6 +947,8 @@ fn stop_recording_internal() -> Result<String, String> {
         .take();
 
     replace_recording_stream(None);
+    #[cfg(target_os = "macos")]
+    voice_processing::stop();
 
     STREAM_RUNNING.store(false, Ordering::SeqCst);
 
